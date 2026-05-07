@@ -15,17 +15,17 @@
 
 | Фаза | Статус | Содержимое |
 |---|---|---|
-| 0. Bootstrap | ✅ | Каркас Next.js, дизайн-токены, Prisma stub, Docker, `/welcome` |
-| 1. UI primitives | ⏳ | Button, Card, Tag, Input, Toggle, ProgressBar, MatchRing, BottomNav |
-| 2. Static screens | ⏳ | Welcome, Dashboard, History, Favorites, Profile, Analysis (mocks) |
-| 3. i18n | ⏳ | next-intl, RU/EN, переключатель |
-| 4. Auth + Guest | ⏳ | Auth.js, регистрация, вход, гостевая сессия, миграция |
-| 5. Onboarding | ⏳ | 5-шаговый wizard профиля кожи |
-| 6. Domain | ⏳ | Полная Prisma-схема, seed, compatibility-engine, `/api/products/[barcode]` |
+| 0. Bootstrap | ✅ | Каркас Next.js, дизайн-токены, Prisma stub, Docker, /welcome |
+| 1. UI primitives | ✅ | Button, Card, Tag, Input, Toggle, ProgressBar, MatchRing, BottomNav |
+| 2. Static screens | ✅ | Welcome, Dashboard, History, Favorites, Profile, Analysis |
+| 3. i18n | ✅ | next-intl, RU/EN, переключатель языка |
+| 4. Auth + Guest | ✅ | Guest session, login/register UI, middleware, JWT |
+| 5. Demo State / Local MVP | ✅ | localStorage state, onboarding, favorites, history, compare, profile stats |
+| 6. Domain + DB | ⏳ | Полная Prisma-схема, seed, compatibility-engine, API |
 | 7. Scanner | ⏳ | ZXing, реальный barcode-скан |
-| 8. History / Favorites / Ratings | ⏳ | API + RSC, фильтры |
-| 9. PWA + Polish | ⏳ | manifest, иконки |
-| 10. Docker + Deploy | ⏳ | Dockerfile финализация, инструкции для Linux-сервера |
+| 8. History / Favorites / Ratings | ⏳ | API + server persistence |
+| 9. PWA + Polish | ⏳ | manifest, icons, offline polish |
+| 10. Docker + Deploy | ⏳ | Production deploy, Caddy, CI deploy |
 | 11. Tests + CI | ⏳ | Vitest + Playwright |
 
 Полный план — см. [`CLAUDE.md`](./CLAUDE.md).
