@@ -27,7 +27,7 @@ export function GuestButton({ label, className }: GuestButtonProps) {
 
   return (
     <form
-      action={(formData) =>
+      action={() =>
         startTransition(async () => {
           await loginAsGuestAction();
         })

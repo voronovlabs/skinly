@@ -4,9 +4,12 @@ import { cn } from "@/lib/cn";
 /**
  * Input — текстовое поле. Соответствует `.input` в прототипе.
  * Поведение фокуса: lavender-deep border + soft-lavender ring.
+ *
+ * `InputProps` — type alias, а не пустой interface extends, чтобы
+ * не падать на `@typescript-eslint/no-empty-object-type` в production-сборке.
  */
 
-export interface InputProps extends ComponentPropsWithoutRef<"input"> {}
+export type InputProps = ComponentPropsWithoutRef<"input">;
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
   { className, type = "text", ...rest },
