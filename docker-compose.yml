@@ -1,14 +1,16 @@
 # =============================================================================
-# Skinly — docker-compose
-# - postgres: всегда нужен и для local dev, и для prod
-# - web:      production-сборка приложения (за reverse-proxy на сервере)
+# Skinly — docker-compose (PRODUCTION-safe)
 #
-# Локальная разработка:
-#   docker compose up -d postgres
-#   npm run dev
+# - postgres: НЕ публикуется наружу. Доступен только web-контейнеру через
+#   internal network `skinly-net`. Так и должно быть на сервере.
+# - web:      слушает 3000 наружу, дальше его прокидывает Caddy/Nginx.
 #
-# Полный запуск (как на сервере):
+# Запуск на сервере:
 #   docker compose up -d --build
+#
+# Локальная разработка (хост подключается к postgres напрямую) —
+# используй docker-compose.dev.yml поверх (см. README или комментарий
+# в начале того файла).
 # =============================================================================
 
 services:
@@ -22,8 +24,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-skinly}
     volumes:
       - skinly-pg-data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
     healthcheck:
       test:
         - "CMD-SHELL"
