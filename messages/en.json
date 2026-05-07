@@ -1,0 +1,284 @@
+{
+  "common": {
+    "back": "Back",
+    "edit": "Edit",
+    "menu": "Menu",
+    "loading": "Loading…",
+    "or": "or"
+  },
+  "auth": {
+    "login": {
+      "metaTitle": "Sign in",
+      "title": "Welcome back",
+      "subtitle": "Sign in to your Skinly account",
+      "email": "Email",
+      "emailPlaceholder": "you@example.com",
+      "password": "Password",
+      "submit": "Sign in",
+      "submitting": "Signing in…",
+      "noAccount": "No account yet?",
+      "registerLink": "Sign up",
+      "errors": {
+        "validation": "Please check the values you entered",
+        "invalid_credentials": "Wrong email or password",
+        "db_unavailable": "Database is unavailable. Try later or continue as guest.",
+        "unknown": "Something went wrong. Please try again."
+      }
+    },
+    "register": {
+      "metaTitle": "Sign up",
+      "title": "Create account",
+      "subtitle": "Free, no commitment",
+      "name": "Name",
+      "namePlaceholder": "How should we call you",
+      "email": "Email",
+      "emailPlaceholder": "you@example.com",
+      "password": "Password",
+      "passwordHint": "Minimum 8 characters",
+      "submit": "Create account",
+      "submitting": "Creating…",
+      "haveAccount": "Already have an account?",
+      "loginLink": "Sign in",
+      "errors": {
+        "validation": "Email must be valid, password at least 8 characters",
+        "email_taken": "This email is already registered",
+        "db_unavailable": "Database is unavailable. Try later or continue as guest.",
+        "unknown": "Something went wrong. Please try again."
+      }
+    },
+    "guestCta": "Continue as guest",
+    "back": "Back"
+  },
+  "nav": {
+    "home": "Home",
+    "history": "History",
+    "favorites": "Saved",
+    "profile": "Profile",
+    "scan": "Scan"
+  },
+  "welcome": {
+    "metaTitle": "Welcome",
+    "metaDescription": "Skinly — your personal AI beauty assistant. Scan cosmetics and find out if a product fits your skin.",
+    "logo": "Skinly",
+    "caption": "Your personal beauty assistant",
+    "title": "Understand what you put on your skin",
+    "subtitle": "Scan any product. Get AI-powered analysis. Know if it's right for you.",
+    "steps": {
+      "scan": {
+        "title": "Scan barcode",
+        "desc": "Point camera at any product"
+      },
+      "analyze": {
+        "title": "AI analysis",
+        "desc": "Ingredient breakdown in seconds"
+      },
+      "match": {
+        "title": "Personal match",
+        "desc": "See if it fits your skin profile"
+      }
+    },
+    "ctaStart": "Get started — free",
+    "ctaGuest": "Continue as guest",
+    "trustBar": "Powered by AI · 50,000+ products · Clean beauty focused"
+  },
+  "onboarding": {
+    "metaTitle": "Skin profile setup",
+    "step": "Step {current} of {total}",
+    "skip": "Skip",
+    "continue": "Continue",
+    "complete": "Complete",
+    "questions": {
+      "skinType": {
+        "title": "What's your skin type?",
+        "subtitle": "Select the one that describes your skin most of the time",
+        "options": {
+          "dry": "Dry",
+          "oily": "Oily",
+          "combination": "Combination",
+          "normal": "Normal"
+        }
+      },
+      "sensitivity": {
+        "title": "How sensitive is your skin?",
+        "subtitle": "How does it react to new products?",
+        "options": {
+          "none": "Not sensitive",
+          "mild": "Mildly sensitive",
+          "high": "Very sensitive",
+          "reactive": "Reactive"
+        }
+      },
+      "concerns": {
+        "title": "What are your main concerns?",
+        "subtitle": "Select all that apply",
+        "options": {
+          "acne": "Acne",
+          "aging": "Aging",
+          "pigmentation": "Dark spots",
+          "redness": "Redness",
+          "pores": "Pores",
+          "blackheads": "Blackheads"
+        }
+      },
+      "avoided": {
+        "title": "Any ingredients to avoid?",
+        "subtitle": "We'll flag them in analysis",
+        "options": {
+          "fragrance": "Fragrance",
+          "alcohol": "Alcohol",
+          "sulfates": "Sulfates",
+          "parabens": "Parabens",
+          "essential_oils": "Essential oils"
+        }
+      },
+      "goal": {
+        "title": "Your main skincare goal?",
+        "subtitle": "What matters most to you?",
+        "options": {
+          "clear_skin": "Clear skin",
+          "anti_aging": "Anti-aging",
+          "hydration": "Hydration",
+          "even_tone": "Even tone",
+          "minimal_routine": "Minimal routine"
+        }
+      }
+    }
+  },
+  "dashboard": {
+    "metaTitle": "Home",
+    "greeting": "Good morning",
+    "yourOverview": "Your skin update",
+    "weatherTip": "It's humid today — lighter moisturizer recommended",
+    "recommendations": "Recommended for you",
+    "seeAll": "See all",
+    "recentScans": "Recent scans",
+    "historyLink": "History →",
+    "yourProfile": "Your profile",
+    "profileSummary": "Dry · Sensitive · Hydration",
+    "edit": "Edit",
+    "profileCompletion": "Profile completion: {percent}%",
+    "openProfile": "Open profile",
+    "noScans": "Nothing scanned yet",
+    "noScansHint": "Tap the scanner button below — analysis takes seconds",
+    "skinProfileEmpty": "Profile is empty — start with the questionnaire",
+    "skinProfileEmptyAction": "Take questionnaire"
+  },
+  "scanCard": {
+    "title": "Scan a product",
+    "hint": "Point camera at barcode"
+  },
+  "scanner": {
+    "metaTitle": "Scan",
+    "title": "Scan barcode",
+    "alignBarcode": "Align barcode within frame",
+    "simulateScan": "Simulate scan",
+    "back": "Back",
+    "flash": "Toggle flash",
+    "analyzing": "Analyzing ingredients…",
+    "steps": {
+      "ha": "Hyaluronic acid…",
+      "niacinamide": "Niacinamide…",
+      "ceramides": "Ceramides…",
+      "compatibility": "Analyzing compatibility…",
+      "report": "Finalizing report…"
+    }
+  },
+  "product": {
+    "match": "match",
+    "matchAria": "Compatibility {percent}%",
+    "keyIngredients": "Key ingredients",
+    "skinCompatibility": "Skin compatibility",
+    "aiExplanation": "AI explanation",
+    "scanAnother": "Scan another",
+    "addFavorite": "Add to favorites",
+    "removeFavorite": "Remove from favorites",
+    "addList": "Compare",
+    "removeList": "Remove from compare",
+    "menu": "Menu",
+    "back": "Back",
+    "notFoundTitle": "Product not found"
+  },
+  "history": {
+    "metaTitle": "History",
+    "title": "History",
+    "search": "Search products…",
+    "filters": {
+      "all": "All",
+      "favorites": "Favorites",
+      "good": "Good match",
+      "caution": "Caution"
+    },
+    "buckets": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "week": "This week",
+      "older": "Earlier"
+    },
+    "relativeHoursAgo": "{hours, plural, one {# hour ago} other {# hours ago}}",
+    "yesterdayLabel": "Yesterday",
+    "empty": "Nothing found. Try a different query or filter."
+  },
+  "favorites": {
+    "metaTitle": "Saved",
+    "title": "Saved",
+    "empty": "Nothing here yet. Save products from the analysis page."
+  },
+  "profile": {
+    "metaTitle": "Profile",
+    "freePlan": "Free plan",
+    "proPlan": "Pro",
+    "skinProfileTitle": "Skin profile",
+    "skinType": "Skin type",
+    "sensitivity": "Sensitivity",
+    "concerns": "Concerns",
+    "avoiding": "Avoiding",
+    "editSkinProfile": "Edit skin profile",
+    "statistics": "Statistics",
+    "stats": {
+      "scans": "Scans",
+      "products": "Products",
+      "avgMatch": "Avg match"
+    },
+    "preferences": "Preferences",
+    "language": "Language",
+    "pushNotif": "Push notifications",
+    "emailUpdates": "Email updates",
+    "darkMode": "Dark mode",
+    "help": "Help & support",
+    "privacy": "Privacy policy",
+    "logout": "Log out",
+    "demoSection": "Demo mode",
+    "demoSectionHint": "Profile, history and favorites are stored locally in this browser. Reset to start fresh.",
+    "resetDemo": "Reset demo data",
+    "resetDemoConfirm": "Delete the local skin profile, history and favorites?",
+    "resetDemoDone": "Demo cleared",
+    "skinTypes": {
+      "dry": "Dry",
+      "oily": "Oily",
+      "combination": "Combination",
+      "normal": "Normal"
+    },
+    "sensitivities": {
+      "none": "Not sensitive",
+      "mild": "Mildly sensitive",
+      "high": "High",
+      "reactive": "Reactive"
+    },
+    "concernLabels": {
+      "acne": "Acne",
+      "aging": "Aging",
+      "pigmentation": "Dark spots",
+      "redness": "Redness",
+      "pores": "Pores",
+      "blackheads": "Blackheads"
+    },
+    "avoidedLabels": {
+      "fragrance": "Fragrance",
+      "alcohol": "Alcohol",
+      "sulfates": "Sulfates",
+      "parabens": "Parabens",
+      "essential_oils": "Essential oils"
+    },
+    "phaseNote": "Phase 3 · auth coming in Phase 4"
+  }
+}

@@ -1,0 +1,284 @@
+{
+  "common": {
+    "back": "Назад",
+    "edit": "Изменить",
+    "menu": "Меню",
+    "loading": "Загрузка…",
+    "or": "или"
+  },
+  "auth": {
+    "login": {
+      "metaTitle": "Вход",
+      "title": "С возвращением",
+      "subtitle": "Войдите в свой аккаунт Skinly",
+      "email": "Email",
+      "emailPlaceholder": "you@example.com",
+      "password": "Пароль",
+      "submit": "Войти",
+      "submitting": "Входим…",
+      "noAccount": "Ещё нет аккаунта?",
+      "registerLink": "Зарегистрироваться",
+      "errors": {
+        "validation": "Проверьте введённые данные",
+        "invalid_credentials": "Неверный email или пароль",
+        "db_unavailable": "База данных недоступна. Попробуйте позже или продолжите как гость.",
+        "unknown": "Не получилось. Попробуйте ещё раз."
+      }
+    },
+    "register": {
+      "metaTitle": "Регистрация",
+      "title": "Создать аккаунт",
+      "subtitle": "Бесплатно, без обязательств",
+      "name": "Имя",
+      "namePlaceholder": "Как к вам обращаться",
+      "email": "Email",
+      "emailPlaceholder": "you@example.com",
+      "password": "Пароль",
+      "passwordHint": "Минимум 8 символов",
+      "submit": "Создать аккаунт",
+      "submitting": "Создаём…",
+      "haveAccount": "Уже есть аккаунт?",
+      "loginLink": "Войти",
+      "errors": {
+        "validation": "Email должен быть корректным, пароль — не короче 8 символов",
+        "email_taken": "Этот email уже зарегистрирован",
+        "db_unavailable": "База данных недоступна. Попробуйте позже или продолжите как гость.",
+        "unknown": "Не получилось. Попробуйте ещё раз."
+      }
+    },
+    "guestCta": "Продолжить как гость",
+    "back": "Назад"
+  },
+  "nav": {
+    "home": "Главная",
+    "history": "История",
+    "favorites": "Избранное",
+    "profile": "Профиль",
+    "scan": "Сканировать"
+  },
+  "welcome": {
+    "metaTitle": "Добро пожаловать",
+    "metaDescription": "Skinly — персональный ИИ бьюти-ассистент. Сканируйте состав косметики и узнавайте, подходит ли продукт вашей коже.",
+    "logo": "Skinly",
+    "caption": "Ваш персональный бьюти-ассистент",
+    "title": "Понимайте, что вы наносите на кожу",
+    "subtitle": "Сканируйте любой продукт. Получайте ИИ-анализ. Узнайте, подходит ли он вам.",
+    "steps": {
+      "scan": {
+        "title": "Сканируйте штрихкод",
+        "desc": "Наведите камеру на продукт"
+      },
+      "analyze": {
+        "title": "ИИ-анализ",
+        "desc": "Разбор состава за секунды"
+      },
+      "match": {
+        "title": "Персональная совместимость",
+        "desc": "Узнайте, подходит ли продукт вашей коже"
+      }
+    },
+    "ctaStart": "Начать — бесплатно",
+    "ctaGuest": "Продолжить как гость",
+    "trustBar": "Работает на ИИ · 50 000+ продуктов · Чистый бьюти-фокус"
+  },
+  "onboarding": {
+    "metaTitle": "Анкета профиля кожи",
+    "step": "Шаг {current} из {total}",
+    "skip": "Пропустить",
+    "continue": "Продолжить",
+    "complete": "Готово",
+    "questions": {
+      "skinType": {
+        "title": "Какой у вас тип кожи?",
+        "subtitle": "Выберите тот, что описывает вашу кожу большую часть времени",
+        "options": {
+          "dry": "Сухая",
+          "oily": "Жирная",
+          "combination": "Комбинированная",
+          "normal": "Нормальная"
+        }
+      },
+      "sensitivity": {
+        "title": "Насколько чувствительна ваша кожа?",
+        "subtitle": "Как она реагирует на новые продукты?",
+        "options": {
+          "none": "Не чувствительная",
+          "mild": "Слегка чувствительная",
+          "high": "Очень чувствительная",
+          "reactive": "Реактивная"
+        }
+      },
+      "concerns": {
+        "title": "Какие проблемы кожи вас беспокоят?",
+        "subtitle": "Можно выбрать несколько",
+        "options": {
+          "acne": "Акне",
+          "aging": "Старение",
+          "pigmentation": "Пигментация",
+          "redness": "Покраснения",
+          "pores": "Поры",
+          "blackheads": "Чёрные точки"
+        }
+      },
+      "avoided": {
+        "title": "Есть ли ингредиенты, которых вы избегаете?",
+        "subtitle": "Мы отметим их в анализе",
+        "options": {
+          "fragrance": "Отдушки",
+          "alcohol": "Спирт",
+          "sulfates": "Сульфаты",
+          "parabens": "Парабены",
+          "essential_oils": "Эфирные масла"
+        }
+      },
+      "goal": {
+        "title": "Главная цель вашего ухода?",
+        "subtitle": "Что для вас важнее всего?",
+        "options": {
+          "clear_skin": "Чистая кожа",
+          "anti_aging": "Антивозрастной",
+          "hydration": "Увлажнение",
+          "even_tone": "Ровный тон",
+          "minimal_routine": "Минимальная рутина"
+        }
+      }
+    }
+  },
+  "dashboard": {
+    "metaTitle": "Главная",
+    "greeting": "Доброе утро",
+    "yourOverview": "Ваш обзор кожи",
+    "weatherTip": "Сегодня влажно — рекомендуем более лёгкое увлажнение",
+    "recommendations": "Рекомендации для вас",
+    "seeAll": "Смотреть все",
+    "recentScans": "Недавние сканы",
+    "historyLink": "История →",
+    "yourProfile": "Ваш профиль",
+    "profileSummary": "Сухая · Чувствительная · Увлажнение",
+    "edit": "Изменить",
+    "profileCompletion": "Профиль заполнен на {percent}%",
+    "openProfile": "Открыть профиль",
+    "noScans": "Ничего ещё не отсканировано",
+    "noScansHint": "Нажмите кнопку сканера снизу — анализ занимает пару секунд",
+    "skinProfileEmpty": "Профиль не заполнен — начните с анкеты",
+    "skinProfileEmptyAction": "Пройти анкету"
+  },
+  "scanCard": {
+    "title": "Сканировать продукт",
+    "hint": "Наведите камеру на штрихкод"
+  },
+  "scanner": {
+    "metaTitle": "Сканировать",
+    "title": "Сканировать штрихкод",
+    "alignBarcode": "Наведите штрихкод в рамку",
+    "simulateScan": "Симуляция скана",
+    "back": "Назад",
+    "flash": "Включить вспышку",
+    "analyzing": "Анализируем состав…",
+    "steps": {
+      "ha": "Гиалуроновая кислота…",
+      "niacinamide": "Ниацинамид…",
+      "ceramides": "Керамиды…",
+      "compatibility": "Анализируем совместимость…",
+      "report": "Формируем отчёт…"
+    }
+  },
+  "product": {
+    "match": "совместимости",
+    "matchAria": "Совместимость {percent}%",
+    "keyIngredients": "Ключевые ингредиенты",
+    "skinCompatibility": "Совместимость с кожей",
+    "aiExplanation": "Объяснение ИИ",
+    "scanAnother": "Сканировать ещё",
+    "addFavorite": "Добавить в избранное",
+    "removeFavorite": "Убрать из избранного",
+    "addList": "Сравнить",
+    "removeList": "Убрать из сравнения",
+    "menu": "Меню",
+    "back": "Назад",
+    "notFoundTitle": "Продукт не найден"
+  },
+  "history": {
+    "metaTitle": "История",
+    "title": "История",
+    "search": "Поиск продуктов…",
+    "filters": {
+      "all": "Все",
+      "favorites": "Избранное",
+      "good": "Хорошая совместимость",
+      "caution": "С осторожностью"
+    },
+    "buckets": {
+      "today": "Сегодня",
+      "yesterday": "Вчера",
+      "week": "На этой неделе",
+      "older": "Ранее"
+    },
+    "relativeHoursAgo": "{hours, plural, one {# час назад} few {# часа назад} many {# часов назад} other {# часов назад}}",
+    "yesterdayLabel": "Вчера",
+    "empty": "Ничего не найдено. Попробуйте другой запрос или фильтр."
+  },
+  "favorites": {
+    "metaTitle": "Избранное",
+    "title": "Избранное",
+    "empty": "Здесь пока пусто. Сохраняйте продукты со страницы анализа."
+  },
+  "profile": {
+    "metaTitle": "Профиль",
+    "freePlan": "Бесплатный план",
+    "proPlan": "Pro",
+    "skinProfileTitle": "Профиль кожи",
+    "skinType": "Тип кожи",
+    "sensitivity": "Чувствительность",
+    "concerns": "Проблемы",
+    "avoiding": "Избегаете",
+    "editSkinProfile": "Изменить профиль кожи",
+    "statistics": "Статистика",
+    "stats": {
+      "scans": "Сканов",
+      "products": "Продуктов",
+      "avgMatch": "Средняя совместимость"
+    },
+    "preferences": "Настройки",
+    "language": "Язык",
+    "pushNotif": "Push-уведомления",
+    "emailUpdates": "Email-рассылка",
+    "darkMode": "Тёмная тема",
+    "help": "Помощь и поддержка",
+    "privacy": "Политика конфиденциальности",
+    "logout": "Выйти",
+    "demoSection": "Demo-режим",
+    "demoSectionHint": "Профиль, история и избранное хранятся локально в этом браузере. Сбросьте, чтобы начать заново.",
+    "resetDemo": "Сбросить demo-данные",
+    "resetDemoConfirm": "Удалить локальный профиль кожи, историю и избранное?",
+    "resetDemoDone": "Demo сброшен",
+    "skinTypes": {
+      "dry": "Сухая",
+      "oily": "Жирная",
+      "combination": "Комбинированная",
+      "normal": "Нормальная"
+    },
+    "sensitivities": {
+      "none": "Не чувствительная",
+      "mild": "Слегка чувствительная",
+      "high": "Высокая",
+      "reactive": "Реактивная"
+    },
+    "concernLabels": {
+      "acne": "Акне",
+      "aging": "Старение",
+      "pigmentation": "Пигментация",
+      "redness": "Покраснения",
+      "pores": "Поры",
+      "blackheads": "Чёрные точки"
+    },
+    "avoidedLabels": {
+      "fragrance": "Отдушки",
+      "alcohol": "Спирт",
+      "sulfates": "Сульфаты",
+      "parabens": "Парабены",
+      "essential_oils": "Эфирные масла"
+    },
+    "phaseNote": "Phase 3 · auth подключится в Phase 4"
+  }
+}

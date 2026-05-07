@@ -1,0 +1,1777 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Skinly — ИИ-бьюти ассистент</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --pure-white: #FFFFFF;
+            --warm-white: #FAF9F7;
+            --soft-beige: #F2EFE9;
+            --graphite: #1A1A1A;
+            --muted-graphite: #6B6B6B;
+            --light-graphite: #A3A3A3;
+            --soft-lavender: #E6E0F5;
+            --lavender-deep: #9B8FD4;
+            --elegant-nude: #E8D5C4;
+            --soft-gold: #D4AF37;
+            --premium-peach: #F5E6E0;
+            --success-mint: #E0F0E8;
+            --warning-cream: #F5F0E0;
+            --error-blush: #F5E0E0;
+            
+            --shadow-sm: 0 1px 2px rgba(26, 26, 26, 0.04);
+            --shadow-md: 0 4px 12px rgba(26, 26, 26, 0.06);
+            --shadow-lg: 0 8px 24px rgba(26, 26, 26, 0.08);
+            --shadow-xl: 0 16px 48px rgba(26, 26, 26, 0.10);
+            
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --radius-xl: 24px;
+            --radius-full: 9999px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--warm-white);
+            color: var(--graphite);
+            line-height: 1.65;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Typography optimized for Cyrillic */
+        .display { 
+            font-size: clamp(28px, 5vw, 44px); 
+            font-weight: 300; 
+            line-height: 1.15; 
+            letter-spacing: -0.01em; 
+        }
+        .h1 { 
+            font-size: clamp(22px, 3vw, 30px); 
+            font-weight: 500; 
+            line-height: 1.25; 
+            letter-spacing: 0; 
+        }
+        .h2 { 
+            font-size: clamp(18px, 2.5vw, 22px); 
+            font-weight: 500; 
+            line-height: 1.35; 
+        }
+        .h3 { 
+            font-size: clamp(15px, 2vw, 17px); 
+            font-weight: 600; 
+            line-height: 1.45; 
+        }
+        .body { 
+            font-size: 15px; 
+            font-weight: 400; 
+            line-height: 1.65; 
+            letter-spacing: 0.01em; 
+        }
+        .body-small { 
+            font-size: 13px; 
+            font-weight: 400; 
+            line-height: 1.55; 
+            letter-spacing: 0.01em; 
+        }
+        .caption { 
+            font-size: 11px; 
+            font-weight: 500; 
+            line-height: 1.4; 
+            letter-spacing: 0.04em; 
+            text-transform: uppercase; 
+        }
+        .muted { color: var(--muted-graphite); }
+        .light { color: var(--light-graphite); }
+
+        /* Layout */
+        .screen {
+            min-height: 100vh;
+            width: 100%;
+            max-width: 480px;
+            margin: 0 auto;
+            background: var(--warm-white);
+            position: relative;
+            display: none;
+            padding-bottom: 100px;
+        }
+
+        .screen.active {
+            display: block;
+            animation: fadeIn 0.4s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Buttons — wider padding for longer Cyrillic words */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 16px 28px;
+            border-radius: var(--radius-full);
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s ease-out;
+            text-decoration: none;
+            width: 100%;
+            word-break: keep-all;
+        }
+
+        .btn-primary {
+            background: var(--graphite);
+            color: var(--pure-white);
+            box-shadow: var(--shadow-md);
+        }
+
+        .btn-primary:hover {
+            transform: scale(1.02);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .btn-primary:active {
+            transform: scale(0.98);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--graphite);
+            border: 1px solid #E2E2E2;
+        }
+
+        .btn-secondary:hover {
+            background: var(--warm-white);
+        }
+
+        .btn-ghost {
+            background: rgba(230, 224, 245, 0.4);
+            color: var(--lavender-deep);
+        }
+
+        /* Cards */
+        .card {
+            background: var(--pure-white);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            box-shadow: var(--shadow-md);
+            transition: all 0.2s ease-out;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .card-glass {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+
+        /* Inputs */
+        .input {
+            width: 100%;
+            padding: 16px;
+            background: var(--warm-white);
+            border: 1px solid #E8E8E8;
+            border-radius: var(--radius-md);
+            font-size: 15px;
+            font-family: inherit;
+            transition: all 0.2s ease-out;
+            outline: none;
+        }
+
+        .input:focus {
+            border-color: var(--lavender-deep);
+            box-shadow: 0 0 0 3px rgba(155, 143, 212, 0.15);
+        }
+
+        /* Tags */
+        .tag {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 12px;
+            background: var(--soft-beige);
+            color: var(--muted-graphite);
+            border-radius: var(--radius-full);
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .tag.active {
+            background: var(--soft-lavender);
+            color: var(--lavender-deep);
+        }
+
+        /* Progress */
+        .progress-bar {
+            height: 3px;
+            background: var(--soft-beige);
+            border-radius: var(--radius-full);
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--lavender-deep);
+            transition: width 0.4s ease-out;
+        }
+
+        /* Navigation */
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100%;
+            max-width: 480px;
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(20px);
+            border-top: 1px solid rgba(0,0,0,0.05);
+            display: flex;
+            justify-content: space-around;
+            padding: 12px 0 24px;
+            z-index: 100;
+        }
+
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            color: var(--light-graphite);
+            font-size: 10px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: color 0.2s;
+            text-decoration: none;
+            letter-spacing: 0.02em;
+        }
+
+        .nav-item.active {
+            color: var(--lavender-deep);
+        }
+
+        .nav-item svg {
+            width: 24px;
+            height: 24px;
+        }
+
+        .nav-center {
+            position: relative;
+            top: -20px;
+        }
+
+        .nav-center .btn {
+            width: 56px;
+            height: 56px;
+            padding: 0;
+            border-radius: 50%;
+            box-shadow: var(--shadow-lg);
+            animation: pulse 3s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        /* Language Switcher */
+        .lang-switch {
+            display: inline-flex;
+            background: var(--soft-beige);
+            border-radius: var(--radius-full);
+            padding: 4px;
+            gap: 4px;
+        }
+
+        .lang-btn {
+            padding: 6px 12px;
+            border-radius: var(--radius-full);
+            border: none;
+            background: transparent;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: var(--muted-graphite);
+        }
+
+        .lang-btn.active {
+            background: var(--pure-white);
+            color: var(--graphite);
+            box-shadow: var(--shadow-sm);
+        }
+
+        /* Specific Screen Styles */
+        
+        /* Welcome Screen */
+        #welcome-screen {
+            background: linear-gradient(135deg, var(--warm-white) 0%, var(--soft-beige) 50%, var(--soft-lavender) 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 48px 24px;
+            text-align: center;
+        }
+
+        #welcome-screen .logo {
+            font-size: 28px;
+            font-weight: 500;
+            letter-spacing: -0.02em;
+            margin-bottom: 48px;
+        }
+
+        #welcome-screen .hero-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 24px;
+        }
+
+        .value-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            margin: 32px 0;
+        }
+
+        .step-item {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            text-align: left;
+            padding: 16px;
+            background: rgba(255,255,255,0.6);
+            border-radius: var(--radius-lg);
+            backdrop-filter: blur(10px);
+        }
+
+        .step-icon {
+            width: 40px;
+            height: 40px;
+            background: var(--soft-lavender);
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            font-size: 20px;
+        }
+
+        /* Onboarding */
+        .onboarding-header {
+            padding: 24px;
+            position: sticky;
+            top: 0;
+            background: var(--warm-white);
+            z-index: 10;
+        }
+
+        .question-card {
+            padding: 24px;
+        }
+
+        .option-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 24px;
+        }
+
+        .option-card {
+            padding: 20px;
+            background: var(--pure-white);
+            border: 2px solid transparent;
+            border-radius: var(--radius-lg);
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+
+        .option-card:hover {
+            border-color: var(--soft-lavender);
+        }
+
+        .option-card.selected {
+            border-color: var(--lavender-deep);
+            background: var(--soft-lavender);
+        }
+
+        .option-icon {
+            width: 48px;
+            height: 48px;
+            margin: 0 auto 12px;
+            background: var(--soft-beige);
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+
+        /* Dashboard */
+        .dashboard-header {
+            padding: 24px;
+            background: linear-gradient(180deg, var(--warm-white) 0%, transparent 100%);
+        }
+
+        .scan-card {
+            background: linear-gradient(135deg, var(--soft-lavender) 0%, var(--premium-peach) 100%);
+            padding: 32px;
+            margin: 0 24px 24px;
+            border-radius: var(--radius-xl);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .scan-card:active {
+            transform: scale(0.98);
+        }
+
+        .scan-icon {
+            width: 64px;
+            height: 64px;
+            background: var(--pure-white);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: var(--shadow-md);
+            font-size: 28px;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 24px;
+            margin-bottom: 16px;
+        }
+
+        .product-scroll {
+            display: flex;
+            gap: 16px;
+            padding: 0 24px;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+
+        .product-scroll::-webkit-scrollbar {
+            display: none;
+        }
+
+        .product-card {
+            flex-shrink: 0;
+            width: 160px;
+            background: var(--pure-white);
+            border-radius: var(--radius-lg);
+            padding: 12px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .product-thumb {
+            width: 100%;
+            height: 120px;
+            background: var(--soft-beige);
+            border-radius: var(--radius-md);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+        }
+
+        .match-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            background: var(--success-mint);
+            color: #2D6A4F;
+            border-radius: var(--radius-sm);
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        /* Scanner */
+        #scanner-screen {
+            background: #000;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            max-width: none;
+            z-index: 1000;
+            display: none;
+            flex-direction: column;
+        }
+
+        #scanner-screen.active {
+            display: flex;
+        }
+
+        .scanner-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+        }
+
+        .scanner-frame {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 280px;
+            height: 200px;
+            border-radius: var(--radius-xl);
+        }
+
+        .scanner-corners {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+        }
+
+        .corner {
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            border: 2px solid white;
+        }
+
+        .corner-tl { top: -2px; left: -2px; border-right: none; border-bottom: none; }
+        .corner-tr { top: -2px; right: -2px; border-left: none; border-bottom: none; }
+        .corner-bl { bottom: -2px; left: -2px; border-right: none; border-top: none; }
+        .corner-br { bottom: -2px; right: -2px; border-left: none; border-top: none; }
+
+        .scanner-laser {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: rgba(255,255,255,0.8);
+            box-shadow: 0 0 4px rgba(255,255,255,0.8);
+            animation: scan 2s linear infinite;
+        }
+
+        @keyframes scan {
+            0% { top: 0; opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { top: 100%; opacity: 0; }
+        }
+
+        .scanner-hint {
+            position: absolute;
+            bottom: 120px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-size: 14px;
+            text-align: center;
+            width: 100%;
+            padding: 0 24px;
+        }
+
+        /* Analysis */
+        .analysis-header {
+            background: linear-gradient(135deg, var(--soft-beige) 0%, var(--warm-white) 100%);
+            padding: 24px;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .product-hero {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .product-image {
+            width: 120px;
+            height: 120px;
+            background: var(--pure-white);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 60px;
+            flex-shrink: 0;
+        }
+
+        .verdict-card {
+            margin: 24px;
+            padding: 24px;
+            background: linear-gradient(135deg, var(--success-mint) 0%, var(--pure-white) 100%);
+            border-radius: var(--radius-xl);
+            border-left: 4px solid #2D6A4F;
+        }
+
+        .verdict-card.caution {
+            background: linear-gradient(135deg, var(--warning-cream) 0%, var(--pure-white) 100%);
+            border-left-color: #B8860B;
+        }
+
+        .match-ring {
+            width: 80px;
+            height: 80px;
+            margin: 16px auto;
+            position: relative;
+        }
+
+        .match-ring svg {
+            transform: rotate(-90deg);
+        }
+
+        .match-ring-bg {
+            fill: none;
+            stroke: var(--soft-beige);
+            stroke-width: 6;
+        }
+
+        .match-ring-fill {
+            fill: none;
+            stroke: var(--lavender-deep);
+            stroke-width: 6;
+            stroke-linecap: round;
+            stroke-dasharray: 220;
+            stroke-dashoffset: 220;
+            animation: ringFill 2s ease-out forwards;
+        }
+
+        @keyframes ringFill {
+            to { stroke-dashoffset: 33; }
+        }
+
+        .match-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--lavender-deep);
+        }
+
+        .ingredient-section {
+            padding: 0 24px;
+            margin-bottom: 24px;
+        }
+
+        .ingredient-card {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 16px;
+            background: var(--pure-white);
+            border-radius: var(--radius-md);
+            margin-bottom: 8px;
+            border-left: 3px solid var(--success-mint);
+        }
+
+        .ingredient-card.caution {
+            border-left-color: var(--soft-gold);
+        }
+
+        .ingredient-card.danger {
+            border-left-color: var(--error-blush);
+        }
+
+        .ingredient-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-top: 6px;
+            flex-shrink: 0;
+        }
+
+        .action-bar {
+            position: fixed;
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100%;
+            max-width: 480px;
+            background: var(--pure-white);
+            padding: 16px 24px 32px;
+            display: flex;
+            gap: 12px;
+            box-shadow: 0 -4px 24px rgba(0,0,0,0.08);
+            z-index: 100;
+        }
+
+        .action-bar .btn {
+            flex: 1;
+            padding: 16px 16px;
+        }
+
+        .action-bar .btn-icon {
+            width: 48px;
+            padding: 0;
+            flex: none;
+        }
+
+        /* History */
+        .history-item {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--soft-beige);
+            cursor: pointer;
+        }
+
+        .history-thumb {
+            width: 60px;
+            height: 60px;
+            background: var(--soft-beige);
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 30px;
+            flex-shrink: 0;
+        }
+
+        /* Profile */
+        .profile-header {
+            text-align: center;
+            padding: 48px 24px 24px;
+            background: linear-gradient(180deg, var(--soft-lavender) 0%, var(--warm-white) 100%);
+        }
+
+        .avatar {
+            width: 80px;
+            height: 80px;
+            background: var(--pure-white);
+            border-radius: 50%;
+            margin: 0 auto 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            box-shadow: var(--shadow-md);
+        }
+
+        .profile-section {
+            padding: 24px;
+            border-bottom: 1px solid var(--soft-beige);
+        }
+
+        .profile-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            cursor: pointer;
+        }
+
+        .toggle {
+            width: 48px;
+            height: 28px;
+            background: var(--soft-beige);
+            border-radius: var(--radius-full);
+            position: relative;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .toggle.active {
+            background: var(--lavender-deep);
+        }
+
+        .toggle-knob {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 24px;
+            height: 24px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.2s;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .toggle.active .toggle-knob {
+            transform: translateX(20px);
+        }
+
+        /* Animations */
+        .slide-in {
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); }
+            to { transform: translateX(0); }
+        }
+
+        /* Utility */
+        .text-center { text-align: center; }
+        .mb-1 { margin-bottom: 4px; }
+        .mb-2 { margin-bottom: 8px; }
+        .mb-3 { margin-bottom: 12px; }
+        .mb-4 { margin-bottom: 16px; }
+        .mb-5 { margin-bottom: 24px; }
+        .mt-4 { margin-top: 16px; }
+        .mt-5 { margin-top: 24px; }
+        .p-4 { padding: 16px; }
+        .px-4 { padding-left: 16px; padding-right: 16px; }
+        .flex { display: flex; }
+        .items-center { align-items: center; }
+        .justify-between { justify-content: space-between; }
+        .gap-2 { gap: 8px; }
+        .gap-3 { gap: 12px; }
+        .flex-1 { flex: 1; }
+        .w-full { width: 100%; }
+    </style>
+</head>
+<body>
+
+    <!-- WELCOME SCREEN -->
+    <div id="welcome-screen" class="screen active">
+        <div class="logo">Skinly</div>
+        
+        <div class="hero-content">
+            <div class="caption muted mb-2" data-i18n="welcome_caption">ВАШ ПЕРСОНАЛЬНЫЙ БЬЮТИ-АССИСТЕНТ</div>
+            <h1 class="display mb-3" data-i18n="welcome_title">Понимайте, что вы наносите на кожу</h1>
+            <p class="body muted" data-i18n="welcome_subtitle">Сканируйте любой продукт. Получайте ИИ-анализ. Узнайте, подходит ли он вам.</p>
+            
+            <div class="value-steps">
+                <div class="step-item">
+                    <div class="step-icon">📷</div>
+                    <div>
+                        <div class="h3" data-i18n="step1_title">Сканируйте штрихкод</div>
+                        <div class="body-small muted" data-i18n="step1_desc">Наведите камеру на продукт</div>
+                    </div>
+                </div>
+                <div class="step-item">
+                    <div class="step-icon">✨</div>
+                    <div>
+                        <div class="h3" data-i18n="step2_title">ИИ-анализ</div>
+                        <div class="body-small muted" data-i18n="step2_desc">Разбор состава за секунды</div>
+                    </div>
+                </div>
+                <div class="step-item">
+                    <div class="step-icon">🎯</div>
+                    <div>
+                        <div class="h3" data-i18n="step3_title">Персональная совместимость</div>
+                        <div class="body-small muted" data-i18n="step3_desc">Узнайте, подходит ли продукт вашей коже</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div>
+            <button class="btn btn-primary mb-3" onclick="showScreen('onboarding-screen')" data-i18n="cta_start">Начать — бесплатно</button>
+            <button class="btn btn-secondary" onclick="showScreen('dashboard-screen')" data-i18n="cta_guest">Продолжить как гость</button>
+            <div class="caption muted text-center mt-4" style="text-transform: none; letter-spacing: normal; font-size: 11px;" data-i18n="trust_bar">
+                Работает на ИИ • 50 000+ продуктов • Чистый бьюти-фокус
+            </div>
+        </div>
+    </div>
+
+    <!-- ONBOARDING SCREEN -->
+    <div id="onboarding-screen" class="screen">
+        <div class="onboarding-header">
+            <div class="flex items-center justify-between mb-3">
+                <button onclick="showScreen('welcome-screen')" style="background:none;border:none;font-size:24px;cursor:pointer;">←</button>
+                <span class="caption light"><span data-i18n="step">Шаг</span> <span id="step-num">1</span> <span data-i18n="of">из</span> 5</span>
+                <button onclick="showScreen('dashboard-screen')" style="background:none;border:none;font-size:14px;color:var(--muted-graphite);cursor:pointer;" data-i18n="skip">Пропустить</button>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill" style="width: 20%"></div>
+            </div>
+        </div>
+
+        <div class="question-card">
+            <h2 class="h1 mb-2" id="question-text">Какой у вас тип кожи?</h2>
+            <p class="body-small muted mb-5" id="question-sub">Выберите тот, что описывает вашу кожу большую часть времени</p>
+            
+            <div class="option-grid" id="options-grid">
+                <!-- Generated by JS -->
+            </div>
+        </div>
+
+        <div style="padding: 24px; position: fixed; bottom: 0; width: 100%; max-width: 480px;">
+            <button class="btn btn-primary" onclick="nextStep()" id="next-btn" data-i18n="continue">Продолжить</button>
+        </div>
+    </div>
+
+    <!-- DASHBOARD SCREEN -->
+    <div id="dashboard-screen" class="screen">
+        <div class="dashboard-header">
+            <div class="flex items-center justify-between mb-2">
+                <div>
+                    <div class="caption muted mb-1" data-i18n="greeting">Доброе утро</div>
+                    <h1 class="h1" data-i18n="your_overview">Ваш обзор кожи</h1>
+                </div>
+                <div style="width: 40px; height: 40px; background: var(--soft-beige); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px;">👤</div>
+            </div>
+            <div class="tag" style="background: var(--premium-peach); color: var(--graphite);">
+                💡 <span data-i18n="weather_tip">Сегодня влажно — рекомендуем более лёгкое увлажнение</span>
+            </div>
+        </div>
+
+        <div class="scan-card" onclick="showScreen('scanner-screen')">
+            <div>
+                <div class="h2 mb-1" data-i18n="scan_product">Сканировать продукт</div>
+                <div class="body-small muted" data-i18n="scan_hint">Наведите камеру на штрихкод</div>
+            </div>
+            <div class="scan-icon">📷</div>
+        </div>
+
+        <div class="section-header">
+            <h3 class="h3" data-i18n="recommendations">Рекомендации для вас</h3>
+            <span class="body-small" style="color: var(--lavender-deep); cursor: pointer;" data-i18n="see_all">Смотреть все</span>
+        </div>
+        
+        <div class="product-scroll mb-5">
+            <div class="product-card">
+                <div class="product-thumb">🧴</div>
+                <div class="caption muted mb-1">COSRX</div>
+                <div class="body-small mb-2">Advanced Snail 96 Mucin</div>
+                <span class="match-badge">98% <span data-i18n="match">совместимости</span></span>
+            </div>
+            <div class="product-card">
+                <div class="product-thumb">🌿</div>
+                <div class="caption muted mb-1">Paula's Choice</div>
+                <div class="body-small mb-2">2% BHA Liquid</div>
+                <span class="match-badge">95% <span data-i18n="match">совместимости</span></span>
+            </div>
+            <div class="product-card">
+                <div class="product-thumb">💧</div>
+                <div class="caption muted mb-1">The Ordinary</div>
+                <div class="body-small mb-2">Hyaluronic Acid 2%</div>
+                <span class="match-badge">92% <span data-i18n="match">совместимости</span></span>
+            </div>
+        </div>
+
+        <div class="section-header">
+            <h3 class="h3" data-i18n="recent_scans">Недавние сканы</h3>
+            <span class="body-small" style="color: var(--lavender-deep); cursor: pointer;" onclick="showScreen('history-screen')" data-i18n="history_link">История →</span>
+        </div>
+        
+        <div style="padding: 0 24px;">
+            <div class="card mb-3" style="display: flex; align-items: center; gap: 16px; cursor: pointer;" onclick="showScreen('analysis-screen')">
+                <div style="width: 60px; height: 60px; background: var(--soft-beige); border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; font-size: 30px;">🧴</div>
+                <div class="flex-1">
+                    <div class="body-small muted">La Roche-Posay</div>
+                    <div class="body">Effaclar Duo (+)</div>
+                </div>
+                <div style="color: var(--lavender-deep); font-weight: 600;">87%</div>
+            </div>
+        </div>
+
+        <div class="section-header mt-4">
+            <h3 class="h3" data-i18n="your_profile">Ваш профиль</h3>
+        </div>
+        <div style="padding: 0 24px;">
+            <div class="card">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="body-small" data-i18n="profile_summary">Сухая • Чувствительная • Увлажнение</span>
+                    <span class="body-small" style="color: var(--lavender-deep); cursor: pointer;" data-i18n="edit">Изменить</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: 75%"></div>
+                </div>
+                <div class="caption muted mt-2" data-i18n="profile_completion">Профиль заполнен на 75%</div>
+            </div>
+        </div>
+
+        <!-- Bottom Nav -->
+        <div class="bottom-nav">
+            <a class="nav-item active" onclick="showScreen('dashboard-screen')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+                <span data-i18n="nav_home">Главная</span>
+            </a>
+            <a class="nav-item" onclick="showScreen('history-screen')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                <span data-i18n="nav_history">История</span>
+            </a>
+            <div class="nav-center">
+                <button class="btn btn-primary" style="width: 56px; height: 56px; padding: 0;" onclick="showScreen('scanner-screen')">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="8" y1="12" x2="16" y2="12"></line><line x1="12" y1="8" x2="12" y2="16"></line></svg>
+                </button>
+            </div>
+            <a class="nav-item" onclick="showScreen('favorites-screen')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+                <span data-i18n="nav_saved">Избранное</span>
+            </a>
+            <a class="nav-item" onclick="showScreen('profile-screen')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                <span data-i18n="nav_profile">Профиль</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- SCANNER SCREEN -->
+    <div id="scanner-screen">
+        <div style="position: absolute; top: 0; left: 0; width: 100%; padding: 24px; display: flex; justify-content: space-between; align-items: center; z-index: 10; color: white;">
+            <button onclick="showScreen('dashboard-screen')" style="background: rgba(0,0,0,0.3); border: none; color: white; width: 40px; height: 40px; border-radius: 50%; cursor: pointer; backdrop-filter: blur(10px);">←</button>
+            <span class="h3" style="color: white;" data-i18n="scan_barcode">Сканировать штрихкод</span>
+            <button style="background: rgba(0,0,0,0.3); border: none; color: white; width: 40px; height: 40px; border-radius: 50%; cursor: pointer; backdrop-filter: blur(10px);">⚡</button>
+        </div>
+
+        <div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(45deg, #1a1a2e, #16213e); display: flex; align-items: center; justify-content: center;">
+            <div style="position: absolute; width: 100%; height: 100%; opacity: 0.3; background: url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23ffffff%22 opacity=%220.1%22 x=%220%22 y=%220%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2250%22 font-size=%2210%22 fill=%22white%22 text-anchor=%22middle%22 dy=%22.3em%22>Camera</text></svg>'); background-size: cover;"></div>
+        </div>
+
+        <div class="scanner-overlay"></div>
+        
+        <div class="scanner-frame">
+            <div class="scanner-corners">
+                <div class="corner corner-tl"></div>
+                <div class="corner corner-tr"></div>
+                <div class="corner corner-bl"></div>
+                <div class="corner corner-br"></div>
+            </div>
+            <div class="scanner-laser"></div>
+        </div>
+
+        <div class="scanner-hint">
+            <p class="body-small" style="margin-bottom: 8px;" data-i18n="align_barcode">Наведите штрихкод в рамку</p>
+            <button class="btn btn-secondary" style="width: auto; padding: 12px 24px; background: rgba(255,255,255,0.2); color: white; border-color: rgba(255,255,255,0.3);" onclick="simulateScan()" data-i18n="simulate_scan">Симуляция скана</button>
+        </div>
+
+        <!-- Analyzing Overlay -->
+        <div id="analyzing-overlay" style="display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); backdrop-filter: blur(10px); z-index: 20; flex-direction: column; align-items: center; justify-content: center;">
+            <div style="width: 120px; height: 120px; position: relative; margin-bottom: 24px;">
+                <div style="position: absolute; width: 100%; height: 100%; border: 3px solid rgba(155, 143, 212, 0.3); border-radius: 50%; animation: pulse 2s infinite;"></div>
+                <div style="position: absolute; top: 10%; left: 10%; width: 80%; height: 80%; border: 3px solid rgba(155, 143, 212, 0.5); border-radius: 50%; animation: pulse 2s infinite 0.3s;"></div>
+                <div style="position: absolute; top: 20%; left: 20%; width: 60%; height: 60%; border: 3px solid rgba(155, 143, 212, 0.8); border-radius: 50%; animation: pulse 2s infinite 0.6s;"></div>
+                <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 32px;">✨</div>
+            </div>
+            <p class="h3" style="color: white; margin-bottom: 8px;" data-i18n="analyzing">Анализируем состав...</p>
+            <p class="body-small" style="color: rgba(255,255,255,0.7);" id="ingredient-flash">Гиалуроновая кислота...</p>
+        </div>
+    </div>
+
+    <!-- ANALYSIS SCREEN -->
+    <div id="analysis-screen" class="screen">
+        <div class="analysis-header">
+            <div class="flex items-center justify-between mb-4">
+                <button onclick="showScreen('dashboard-screen')" style="background:none;border:none;font-size:24px;cursor:pointer;">←</button>
+                <button style="background:none;border:none;font-size:20px;cursor:pointer;">⋮</button>
+            </div>
+            <div class="product-hero">
+                <div class="product-image">🧴</div>
+                <div>
+                    <div class="caption muted mb-1">LA ROCHE-POSAY</div>
+                    <h2 class="h2 mb-1">Effaclar Duo (+)</h2>
+                    <span class="tag" data-i18n="category_moisturizer">Увлажняющий крем</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="verdict-card">
+            <div class="flex items-center gap-3 mb-3">
+                <div style="width: 40px; height: 40px; background: var(--success-mint); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px;">✓</div>
+                <div>
+                    <div class="h3" data-i18n="verdict_good">Отлично подходит вашей коже</div>
+                    <div class="body-small muted" data-i18n="verdict_sub">На основе вашего профиля: сухая, чувствительная</div>
+                </div>
+            </div>
+            <div class="match-ring">
+                <svg width="80" height="80" viewBox="0 0 80 80">
+                    <circle class="match-ring-bg" cx="40" cy="40" r="35"></circle>
+                    <circle class="match-ring-fill" cx="40" cy="40" r="35"></circle>
+                </svg>
+                <div class="match-text">87%</div>
+            </div>
+        </div>
+
+        <div class="ingredient-section">
+            <h3 class="h3 mb-3" data-i18n="key_ingredients">Ключевые ингредиенты</h3>
+            
+            <div class="ingredient-card">
+                <div class="ingredient-dot" style="background: #2D6A4F;"></div>
+                <div class="flex-1">
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="body" style="font-weight: 600;">Ниацинамид 4%</span>
+                        <span class="tag" style="background: var(--success-mint); color: #2D6A4F;" data-i18n="beneficial">Полезен</span>
+                    </div>
+                    <div class="body-small muted" data-i18n="niacinamide_desc">Снижает воспаление, регулирует сальность, укрепляет барьер</div>
+                </div>
+            </div>
+
+            <div class="ingredient-card">
+                <div class="ingredient-dot" style="background: #2D6A4F;"></div>
+                <div class="flex-1">
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="body" style="font-weight: 600;">Procerad™</span>
+                        <span class="tag" style="background: var(--success-mint); color: #2D6A4F;" data-i18n="anti_imperfection">Против несовершенств</span>
+                    </div>
+                    <div class="body-small muted" data-i18n="procerad_desc">Патентованный керамид для профилактики пост-акне</div>
+                </div>
+            </div>
+
+            <div class="ingredient-card caution">
+                <div class="ingredient-dot" style="background: var(--soft-gold);"></div>
+                <div class="flex-1">
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="body" style="font-weight: 600;">Салициловая кислота 0,5%</span>
+                        <span class="tag" style="background: var(--warning-cream); color: #B8860B;" data-i18n="use_caution">С осторожностью</span>
+                    </div>
+                    <div class="body-small muted" data-i18n="salicylic_desc">Эксфолиант — может раздражать чувствительную кожу. Начните с 2 раз в неделю.</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="ingredient-section">
+            <h3 class="h3 mb-3" data-i18n="skin_compatibility">Совместимость с кожей</h3>
+            <div class="card">
+                <div class="flex items-center justify-between mb-3">
+                    <span class="body-small" data-i18n="your_type">Ваш тип кожи (сухая)</span>
+                    <span style="color: #2D6A4F; font-weight: 600;">✓ <span data-i18n="compatible">Совместимо</span></span>
+                </div>
+                <div class="flex items-center justify-between mb-3">
+                    <span class="body-small" data-i18n="sensitivity">Чувствительность</span>
+                    <span style="color: #B8860B; font-weight: 600;">⚠ <span data-i18n="patch_test">Тест на аллергию</span></span>
+                </div>
+                <div class="flex items-center justify-between mb-3">
+                    <span class="body-small" data-i18n="hydration_goal">Цель увлажнения</span>
+                    <span style="color: #2D6A4F; font-weight: 600;">✓ <span data-i18n="supports">Поддерживает</span></span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span class="body-small" data-i18n="acne_concerns">Проблемы с акне</span>
+                    <span style="color: #2D6A4F; font-weight: 600;">✓ <span data-i18n="treats">Лечит</span></span>
+                </div>
+            </div>
+        </div>
+
+        <div class="ingredient-section" style="margin-bottom: 100px;">
+            <h3 class="h3 mb-3" data-i18n="ai_explanation">Объяснение ИИ</h3>
+            <div class="card" style="background: linear-gradient(135deg, var(--soft-lavender) 0%, var(--pure-white) 100%);">
+                <div class="flex items-start gap-3">
+                    <div style="width: 32px; height: 32px; background: var(--lavender-deep); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 16px; flex-shrink: 0;">✨</div>
+                    <div>
+                        <p class="body-small mb-2" data-i18n="ai_text1">Этот продукт хорошо подходит для вашей сухой, чувствительной кожи, потому что содержит керамиды и ниацинамид, которые укрепляют влажный барьер без раздражения.</p>
+                        <p class="body-small muted" data-i18n="ai_text2">Однако концентрация салициловой кислоты означает, что стоит вводить её постепенно — сначала дважды в неделю — чтобы избежать переэксфолиации.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="action-bar">
+            <button class="btn btn-icon btn-secondary">♡</button>
+            <button class="btn btn-icon btn-secondary">+</button>
+            <button class="btn btn-primary" onclick="showScreen('dashboard-screen')" data-i18n="scan_another">Сканировать ещё</button>
+        </div>
+    </div>
+
+    <!-- HISTORY SCREEN -->
+    <div id="history-screen" class="screen">
+        <div style="padding: 24px; display: flex; align-items: center; gap: 16px;">
+            <button onclick="showScreen('dashboard-screen')" style="background:none;border:none;font-size:24px;cursor:pointer;">←</button>
+            <h1 class="h1" data-i18n="history_title">История</h1>
+        </div>
+
+        <div style="padding: 0 24px 16px;">
+            <input type="text" class="input" placeholder="Поиск продуктов..." style="margin-bottom: 12px;" data-i18n-placeholder="search_placeholder">
+            <div class="flex gap-2" style="overflow-x: auto;">
+                <span class="tag active" data-i18n="filter_all">Все</span>
+                <span class="tag" data-i18n="filter_favorites">Избранное</span>
+                <span class="tag" data-i18n="filter_good">Хорошая совместимость</span>
+                <span class="tag" data-i18n="filter_caution">С осторожностью</span>
+            </div>
+        </div>
+
+        <div class="caption muted" style="padding: 16px 24px;" data-i18n="today">Сегодня</div>
+        <div class="history-item" onclick="showScreen('analysis-screen')">
+            <div class="history-thumb">🧴</div>
+            <div class="flex-1">
+                <div class="body">Effaclar Duo (+)</div>
+                <div class="body-small muted">La Roche-Posay • <span data-i18n="hours_ago">2 часа назад</span></div>
+            </div>
+            <div style="color: var(--lavender-deep); font-weight: 600;">87%</div>
+        </div>
+
+        <div class="caption muted" style="padding: 16px 24px;" data-i18n="yesterday">Вчера</div>
+        <div class="history-item">
+            <div class="history-thumb">🌿</div>
+            <div class="flex-1">
+                <div class="body">Advanced Snail 96</div>
+                <div class="body-small muted">COSRX • <span data-i18n="yesterday">Вчера</span></div>
+            </div>
+            <div style="color: var(--lavender-deep); font-weight: 600;">98%</div>
+        </div>
+        <div class="history-item">
+            <div class="history-thumb">☀️</div>
+            <div class="flex-1">
+                <div class="body">UV Aqua Rich SPF50</div>
+                <div class="body-small muted">Biore • <span data-i18n="yesterday">Вчера</span></div>
+            </div>
+            <div style="color: #B8860B; font-weight: 600;">72%</div>
+        </div>
+
+        <div class="bottom-nav">
+            <a class="nav-item" onclick="showScreen('dashboard-screen')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+                <span data-i18n="nav_home">Главная</span>
+            </a>
+            <a class="nav-item active" onclick="showScreen('history-screen')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                <span data-i18n="nav_history">История</span>
+            </a>
+            <div class="nav-center">
+                <button class="btn btn-primary" style="width: 56px; height: 56px; padding: 0;" onclick="showScreen('scanner-screen')">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="8" y1="12" x2="16" y2="12"></line><line x1="12" y1="8" x2="12" y2="16"></line></svg>
+                </button>
+            </div>
+            <a class="nav-item" onclick="showScreen('favorites-screen')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+                <span data-i18n="nav_saved">Избранное</span>
+            </a>
+            <a class="nav-item" onclick="showScreen('profile-screen')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                <span data-i18n="nav_profile">Профиль</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- FAVORITES SCREEN -->
+    <div id="favorites-screen" class="screen">
+        <div style="padding: 24px;">
+            <h1 class="h1 mb-4" data-i18n="favorites_title">Избранное</h1>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div class="product-card" style="width: auto;">
+                    <div class="product-thumb">🧴</div>
+                    <div class="caption muted mb-1">COSRX</div>
+                    <div class="body-small mb-2">Advanced Snail 96 Mucin</div>
+                    <span class="match-badge">98% <span data-i18n="match">совместимости</span></span>
+                </div>
+                <div class="product-card" style="width: auto;">
+                    <div class="product-thumb">🌿</div>
+                    <div class="caption muted mb-1">Paula's Choice</div>
+                    <div class="body-small mb-2">2% BHA Liquid</div>
+                    <span class="match-badge">95% <span data-i18n="match">совместимости</span></span>
+                </div>
+                <div class="product-card" style="width: auto;">
+                    <div class="product-thumb">💧</div>
+                    <div class="caption muted mb-1">The Ordinary</div>
+                    <div class="body-small mb-2">Hyaluronic Acid 2%</div>
+                    <span class="match-badge">92% <span data-i18n="match">совместимости</span></span>
+                </div>
+            </div>
+        </div>
+
+        <div class="bottom-nav">
+            <a class="nav-item" onclick="showScreen('dashboard-screen')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+                <span data-i18n="nav_home">Главная</span>
+            </a>
+            <a class="nav-item" onclick="showScreen('history-screen')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                <span data-i18n="nav_history">История</span>
+            </a>
+            <div class="nav-center">
+                <button class="btn btn-primary" style="width: 56px; height: 56px; padding: 0;" onclick="showScreen('scanner-screen')">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="8" y1="12" x2="16" y2="12"></line><line x1="12" y1="8" x2="12" y2="16"></line></svg>
+                </button>
+            </div>
+            <a class="nav-item active" onclick="showScreen('favorites-screen')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+                <span data-i18n="nav_saved">Избранное</span>
+            </a>
+            <a class="nav-item" onclick="showScreen('profile-screen')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                <span data-i18n="nav_profile">Профиль</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- PROFILE SCREEN -->
+    <div id="profile-screen" class="screen">
+        <div class="profile-header">
+            <div class="avatar">👤</div>
+            <h2 class="h2">Александра</h2>
+            <p class="body-small muted">alexandra@email.com</p>
+            <div class="tag mt-4" style="background: var(--soft-lavender); color: var(--lavender-deep);" data-i18n="free_plan">Бесплатный план</div>
+        </div>
+
+        <div class="profile-section">
+            <h3 class="h3 mb-3" data-i18n="skin_profile">Профиль кожи</h3>
+            <div class="card mb-3">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="body-small" data-i18n="skin_type">Тип кожи</span>
+                    <span class="body-small" style="font-weight: 600;" data-i18n="type_dry">Сухая</span>
+                </div>
+                <div class="flex items-center justify-between mb-2">
+                    <span class="body-small" data-i18n="sensitivity_label">Чувствительность</span>
+                    <span class="body-small" style="font-weight: 600;" data-i18n="sensitivity_high">Высокая</span>
+                </div>
+                <div class="flex items-center justify-between mb-2">
+                    <span class="body-small" data-i18n="concerns_label">Проблемы</span>
+                    <span class="body-small" style="font-weight: 600;" data-i18n="concerns_hydration">Увлажнение, Старение</span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span class="body-small" data-i18n="avoiding">Избегаете</span>
+                    <span class="body-small" style="font-weight: 600;" data-i18n="avoiding_list">Отдушки, Спирт</span>
+                </div>
+            </div>
+            <button class="btn btn-secondary" onclick="showScreen('onboarding-screen')" data-i18n="edit_profile">Изменить профиль кожи</button>
+        </div>
+
+        <div class="profile-section">
+            <h3 class="h3 mb-3" data-i18n="statistics">Статистика</h3>
+            <div class="flex gap-3">
+                <div class="card flex-1 text-center">
+                    <div class="h2" style="color: var(--lavender-deep);">24</div>
+                    <div class="caption muted" data-i18n="stat_scans">Сканов</div>
+                </div>
+                <div class="card flex-1 text-center">
+                    <div class="h2" style="color: var(--lavender-deep);">18</div>
+                    <div class="caption muted" data-i18n="stat_products">Продуктов</div>
+                </div>
+                <div class="card flex-1 text-center">
+                    <div class="h2" style="color: var(--soft-gold);">87%</div>
+                    <div class="caption muted" data-i18n="stat_avg">Средняя совместимость</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="profile-section">
+            <h3 class="h3 mb-3" data-i18n="preferences">Настройки</h3>
+            
+            <!-- Language Switcher -->
+            <div class="profile-row">
+                <span class="body-small" data-i18n="language">Язык</span>
+                <div class="lang-switch">
+                    <button class="lang-btn active" onclick="setLanguage('ru')" id="lang-ru">RU</button>
+                    <button class="lang-btn" onclick="setLanguage('en')" id="lang-en">EN</button>
+                </div>
+            </div>
+
+            <div class="profile-row">
+                <span class="body-small" data-i18n="push_notif">Push-уведомления</span>
+                <div class="toggle active" onclick="this.classList.toggle('active')">
+                    <div class="toggle-knob"></div>
+                </div>
+            </div>
+            <div class="profile-row">
+                <span class="body-small" data-i18n="email_updates">Email-рассылка</span>
+                <div class="toggle" onclick="this.classList.toggle('active')">
+                    <div class="toggle-knob"></div>
+                </div>
+            </div>
+            <div class="profile-row">
+                <span class="body-small" data-i18n="dark_mode">Тёмная тема</span>
+                <div class="toggle" onclick="this.classList.toggle('active')">
+                    <div class="toggle-knob"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="profile-section" style="border-bottom: none;">
+            <button class="btn btn-secondary mb-3" data-i18n="help">Помощь и поддержка</button>
+            <button class="btn btn-secondary mb-3" data-i18n="privacy">Политика конфиденциальности</button>
+            <button class="btn btn-secondary" style="color: var(--error-blush); border-color: var(--error-blush);" data-i18n="logout">Выйти</button>
+        </div>
+
+        <div class="bottom-nav">
+            <a class="nav-item" onclick="showScreen('dashboard-screen')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+                <span data-i18n="nav_home">Главная</span>
+            </a>
+            <a class="nav-item" onclick="showScreen('history-screen')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                <span data-i18n="nav_history">История</span>
+            </a>
+            <div class="nav-center">
+                <button class="btn btn-primary" style="width: 56px; height: 56px; padding: 0;" onclick="showScreen('scanner-screen')">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="8" y1="12" x2="16" y2="12"></line><line x1="12" y1="8" x2="12" y2="16"></line></svg>
+                </button>
+            </div>
+            <a class="nav-item" onclick="showScreen('favorites-screen')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+                <span data-i18n="nav_saved">Избранное</span>
+            </a>
+            <a class="nav-item active" onclick="showScreen('profile-screen')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                <span data-i18n="nav_profile">Профиль</span>
+            </a>
+        </div>
+    </div>
+
+    <script>
+        // ======================
+        // i18n TRANSLATIONS
+        // ======================
+        const translations = {
+            ru: {
+                welcome_caption: "ВАШ ПЕРСОНАЛЬНЫЙ БЬЮТИ-АССИСТЕНТ",
+                welcome_title: "Понимайте, что вы наносите на кожу",
+                welcome_subtitle: "Сканируйте любой продукт. Получайте ИИ-анализ. Узнайте, подходит ли он вам.",
+                step1_title: "Сканируйте штрихкод",
+                step1_desc: "Наведите камеру на продукт",
+                step2_title: "ИИ-анализ",
+                step2_desc: "Разбор состава за секунды",
+                step3_title: "Персональная совместимость",
+                step3_desc: "Узнайте, подходит ли продукт вашей коже",
+                cta_start: "Начать — бесплатно",
+                cta_guest: "Продолжить как гость",
+                trust_bar: "Работает на ИИ • 50 000+ продуктов • Чистый бьюти-фокус",
+                step: "Шаг",
+                of: "из",
+                skip: "Пропустить",
+                continue: "Продолжить",
+                greeting: "Доброе утро",
+                your_overview: "Ваш обзор кожи",
+                weather_tip: "Сегодня влажно — рекомендуем более лёгкое увлажнение",
+                scan_product: "Сканировать продукт",
+                scan_hint: "Наведите камеру на штрихкод",
+                recommendations: "Рекомендации для вас",
+                see_all: "Смотреть все",
+                match: "совместимости",
+                recent_scans: "Недавние сканы",
+                history_link: "История →",
+                your_profile: "Ваш профиль",
+                profile_summary: "Сухая • Чувствительная • Увлажнение",
+                edit: "Изменить",
+                profile_completion: "Профиль заполнен на 75%",
+                nav_home: "Главная",
+                nav_history: "История",
+                nav_saved: "Избранное",
+                nav_profile: "Профиль",
+                scan_barcode: "Сканировать штрихкод",
+                align_barcode: "Наведите штрихкод в рамку",
+                simulate_scan: "Симуляция скана",
+                analyzing: "Анализируем состав...",
+                category_moisturizer: "Увлажняющий крем",
+                verdict_good: "Отлично подходит вашей коже",
+                verdict_sub: "На основе вашего профиля: сухая, чувствительная",
+                key_ingredients: "Ключевые ингредиенты",
+                beneficial: "Полезен",
+                niacinamide_desc: "Снижает воспаление, регулирует сальность, укрепляет барьер",
+                anti_imperfection: "Против несовершенств",
+                procerad_desc: "Патентованный керамид для профилактики пост-акне",
+                use_caution: "С осторожностью",
+                salicylic_desc: "Эксфолиант — может раздражать чувствительную кожу. Начните с 2 раз в неделю.",
+                skin_compatibility: "Совместимость с кожей",
+                your_type: "Ваш тип кожи (сухая)",
+                compatible: "Совместимо",
+                sensitivity: "Чувствительность",
+                patch_test: "Тест на аллергию",
+                hydration_goal: "Цель увлажнения",
+                supports: "Поддерживает",
+                acne_concerns: "Проблемы с акне",
+                treats: "Лечит",
+                ai_explanation: "Объяснение ИИ",
+                ai_text1: "Этот продукт хорошо подходит для вашей сухой, чувствительной кожи, потому что содержит керамиды и ниацинамид, которые укрепляют влажный барьер без раздражения.",
+                ai_text2: "Однако концентрация салициловой кислоты означает, что стоит вводить её постепенно — сначала дважды в неделю — чтобы избежать переэксфолиации.",
+                scan_another: "Сканировать ещё",
+                history_title: "История",
+                search_placeholder: "Поиск продуктов...",
+                filter_all: "Все",
+                filter_favorites: "Избранное",
+                filter_good: "Хорошая совместимость",
+                filter_caution: "С осторожностью",
+                today: "Сегодня",
+                yesterday: "Вчера",
+                hours_ago: "2 часа назад",
+                favorites_title: "Избранное",
+                free_plan: "Бесплатный план",
+                skin_profile: "Профиль кожи",
+                skin_type: "Тип кожи",
+                type_dry: "Сухая",
+                sensitivity_label: "Чувствительность",
+                sensitivity_high: "Высокая",
+                concerns_label: "Проблемы",
+                concerns_hydration: "Увлажнение, Старение",
+                avoiding: "Избегаете",
+                avoiding_list: "Отдушки, Спирт",
+                edit_profile: "Изменить профиль кожи",
+                statistics: "Статистика",
+                stat_scans: "Сканов",
+                stat_products: "Продуктов",
+                stat_avg: "Средняя совместимость",
+                preferences: "Настройки",
+                language: "Язык",
+                push_notif: "Push-уведомления",
+                email_updates: "Email-рассылка",
+                dark_mode: "Тёмная тема",
+                help: "Помощь и поддержка",
+                privacy: "Политика конфиденциальности",
+                logout: "Выйти"
+            },
+            en: {
+                welcome_caption: "YOUR PERSONAL BEAUTY ASSISTANT",
+                welcome_title: "Understand what you put on your skin",
+                welcome_subtitle: "Scan any product. Get AI-powered analysis. Know if it's right for you.",
+                step1_title: "Scan barcode",
+                step1_desc: "Point camera at any product",
+                step2_title: "AI Analysis",
+                step2_desc: "Ingredient breakdown in seconds",
+                step3_title: "Personal Match",
+                step3_desc: "See if it fits your skin profile",
+                cta_start: "Get Started — Free",
+                cta_guest: "Continue as Guest",
+                trust_bar: "Powered by AI • 50,000+ products • Clean beauty focused",
+                step: "Step",
+                of: "of",
+                skip: "Skip",
+                continue: "Continue",
+                greeting: "Good morning",
+                your_overview: "Your Skin Update",
+                weather_tip: "It's humid today — lighter moisturizer recommended",
+                scan_product: "Scan a product",
+                scan_hint: "Point camera at barcode",
+                recommendations: "Recommended for you",
+                see_all: "See all",
+                match: "match",
+                recent_scans: "Recent scans",
+                history_link: "History →",
+                your_profile: "Your profile",
+                profile_summary: "Dry • Sensitive • Hydration",
+                edit: "Edit",
+                profile_completion: "Profile completion: 75%",
+                nav_home: "Home",
+                nav_history: "History",
+                nav_saved: "Saved",
+                nav_profile: "Profile",
+                scan_barcode: "Scan barcode",
+                align_barcode: "Align barcode within frame",
+                simulate_scan: "Simulate Scan",
+                analyzing: "Analyzing ingredients...",
+                category_moisturizer: "Moisturizer",
+                verdict_good: "Great match for your skin",
+                verdict_sub: "Based on your dry, sensitive profile",
+                key_ingredients: "Key Ingredients",
+                beneficial: "Beneficial",
+                niacinamide_desc: "Reduces inflammation, regulates sebum, strengthens barrier",
+                anti_imperfection: "Anti-imperfection",
+                procerad_desc: "Patented ceramide to prevent post-acne marks",
+                use_caution: "Use with caution",
+                salicylic_desc: "Exfoliant — may irritate sensitive skin. Start with 2x/week.",
+                skin_compatibility: "Skin Compatibility",
+                your_type: "Your skin type (Dry)",
+                compatible: "Compatible",
+                sensitivity: "Sensitivity",
+                patch_test: "Patch test",
+                hydration_goal: "Hydration goal",
+                supports: "Supports",
+                acne_concerns: "Acne concerns",
+                treats: "Treats",
+                ai_explanation: "AI Explanation",
+                ai_text1: "This product is well-suited for your dry, sensitive skin because it contains ceramides and niacinamide that strengthen your moisture barrier without irritation.",
+                ai_text2: "However, the salicylic acid concentration means you should introduce it gradually — twice weekly at first — to avoid over-exfoliation.",
+                scan_another: "Scan Another",
+                history_title: "History",
+                search_placeholder: "Search products...",
+                filter_all: "All",
+                filter_favorites: "Favorites",
+                filter_good: "Good match",
+                filter_caution: "Caution",
+                today: "Today",
+                yesterday: "Yesterday",
+                hours_ago: "2 hours ago",
+                favorites_title: "Favorites",
+                free_plan: "Free Plan",
+                skin_profile: "Skin Profile",
+                skin_type: "Skin type",
+                type_dry: "Dry",
+                sensitivity_label: "Sensitivity",
+                sensitivity_high: "High",
+                concerns_label: "Concerns",
+                concerns_hydration: "Hydration, Aging",
+                avoiding: "Avoiding",
+                avoiding_list: "Fragrance, Alcohol",
+                edit_profile: "Edit Skin Profile",
+                statistics: "Statistics",
+                stat_scans: "Scans",
+                stat_products: "Products",
+                stat_avg: "Avg Match",
+                preferences: "Preferences",
+                language: "Language",
+                push_notif: "Push notifications",
+                email_updates: "Email updates",
+                dark_mode: "Dark mode",
+                help: "Help & Support",
+                privacy: "Privacy Policy",
+                logout: "Log Out"
+            }
+        };
+
+        let currentLang = 'ru';
+
+        function setLanguage(lang) {
+            currentLang = lang;
+            document.documentElement.lang = lang;
+            
+            // Update all elements with data-i18n
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if (translations[lang][key]) {
+                    el.textContent = translations[lang][key];
+                }
+            });
+
+            // Update placeholders
+            document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+                const key = el.getAttribute('data-i18n-placeholder');
+                if (translations[lang][key]) {
+                    el.placeholder = translations[lang][key];
+                }
+            });
+
+            // Update lang switcher UI
+            document.querySelectorAll('.lang-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.getElementById(`lang-${lang}`).classList.add('active');
+
+            // Update onboarding questions if active
+            if (document.getElementById('onboarding-screen').classList.contains('active')) {
+                updateQuestion();
+            }
+        }
+
+        // ======================
+        // APP LOGIC
+        // ======================
+        let currentStep = 1;
+        const totalSteps = 5;
+        
+        const questions = {
+            ru: [
+                { text: "Какой у вас тип кожи?", sub: "Выберите тот, что описывает вашу кожу большую часть времени", options: ["Сухая", "Жирная", "Комбинированная", "Нормальная"] },
+                { text: "Насколько чувствительна ваша кожа?", sub: "Как она реагирует на новые продукты?", options: ["Не чувствительная", "Слегка чувствительная", "Очень чувствительная", "Реактивная"] },
+                { text: "Какие проблемы кожи вас беспокоят?", sub: "Можно выбрать несколько", options: ["Акне", "Старение", "Пигментация", "Покраснения", "Поры", "Чёрные точки"], multi: true },
+                { text: "Есть ли ингредиенты, которых вы избегаете?", sub: "Мы отметим их в анализе", options: ["Отдушки", "Спирт", "Сульфаты", "Парабены", "Эфирные масла"], multi: true },
+                { text: "Главная цель вашего ухода?", sub: "Что для вас важнее всего?", options: ["Чистая кожа", "Антивозрастной", "Увлажнение", "Ровный тон", "Минимальная рутина"] }
+            ],
+            en: [
+                { text: "What's your skin type?", sub: "Select the one that describes your skin most of the time", options: ["Dry", "Oily", "Combination", "Normal"] },
+                { text: "How sensitive is your skin?", sub: "How does it react to new products?", options: ["Not sensitive", "Mildly sensitive", "Very sensitive", "Reactive"] },
+                { text: "What are your main concerns?", sub: "Select all that apply", options: ["Acne", "Aging", "Dark spots", "Redness", "Pores", "Blackheads"], multi: true },
+                { text: "Any ingredients to avoid?", sub: "We'll flag these in analysis", options: ["Fragrance", "Alcohol", "Sulfates", "Parabens", "Essential oils"], multi: true },
+                { text: "Your main skincare goal?", sub: "What matters most to you?", options: ["Clear skin", "Anti-aging", "Hydration", "Even tone", "Minimal routine"] }
+            ]
+        };
+
+        function showScreen(screenId) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById('scanner-screen').classList.remove('active');
+            
+            const target = document.getElementById(screenId);
+            if (target) {
+                target.classList.add('active');
+                window.scrollTo(0, 0);
+            }
+        }
+
+        function selectOption(element) {
+            const grid = element.parentElement;
+            const q = questions[currentLang][currentStep - 1];
+            const isMulti = q?.multi;
+            
+            if (!isMulti) {
+                grid.querySelectorAll('.option-card').forEach(c => c.classList.remove('selected'));
+            }
+            element.classList.toggle('selected');
+        }
+
+        function nextStep() {
+            if (currentStep < totalSteps) {
+                currentStep++;
+                updateQuestion();
+            } else {
+                showScreen('dashboard-screen');
+                currentStep = 1;
+                updateQuestion();
+            }
+        }
+
+        function updateQuestion() {
+            const q = questions[currentLang][currentStep - 1];
+            document.getElementById('step-num').textContent = currentStep;
+            document.getElementById('progress-fill').style.width = (currentStep / totalSteps * 100) + '%';
+            document.getElementById('question-text').textContent = q.text;
+            document.getElementById('question-sub').textContent = q.sub;
+            
+            const grid = document.getElementById('options-grid');
+            grid.innerHTML = '';
+            
+            const icons = ['💧', '✨', '⚖️', '😊', '🛡️', '🔬', '🌿', '⭐', '🎯'];
+            q.options.forEach((opt, i) => {
+                const card = document.createElement('div');
+                card.className = 'option-card';
+                card.onclick = function() { selectOption(this); };
+                card.innerHTML = `
+                    <div class="option-icon">${icons[i] || '•'}</div>
+                    <div class="h3">${opt}</div>
+                `;
+                grid.appendChild(card);
+            });
+            
+            const nextBtn = document.getElementById('next-btn');
+            if (currentStep === totalSteps) {
+                nextBtn.textContent = translations[currentLang].continue === 'Продолжить' ? 'Готово' : 'Complete';
+            } else {
+                nextBtn.textContent = translations[currentLang].continue;
+            }
+        }
+
+        function simulateScan() {
+            const overlay = document.getElementById('analyzing-overlay');
+            const flash = document.getElementById('ingredient-flash');
+            overlay.style.display = 'flex';
+            
+            const ingredients = currentLang === 'ru' 
+                ? ['Гиалуроновая кислота...', 'Ниацинамид...', 'Керамиды...', 'Анализируем совместимость...', 'Формируем отчёт...']
+                : ['Hyaluronic Acid...', 'Niacinamide...', 'Ceramides...', 'Analyzing compatibility...', 'Finalizing report...'];
+            let i = 0;
+            
+            const interval = setInterval(() => {
+                flash.textContent = ingredients[i];
+                i++;
+                if (i >= ingredients.length) {
+                    clearInterval(interval);
+                    setTimeout(() => {
+                        overlay.style.display = 'none';
+                        showScreen('analysis-screen');
+                    }, 500);
+                }
+            }, 400);
+        }
+
+        // Initialize
+        updateQuestion();
+        setLanguage('ru');
+    </script>
+</body>
+</html>

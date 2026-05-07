@@ -1,0 +1,38 @@
+// =============================================================================
+// Skinly — Prisma schema
+//
+// Phase 0: stub `HealthCheck`.
+// Phase 4: User (email + bcrypt) для аутентификации.
+// Phase 6 добавит: SkinProfile, Product, Ingredient, ScanHistory, Favorite,
+// GuestSession, UserProductRating.
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Пинг-таблица для проверки соединения. Удалится в Phase 6.
+model HealthCheck {
+  id        String   @id @default(cuid())
+  note      String?
+  createdAt DateTime @default(now())
+}
+
+/// Зарегистрированный пользователь.
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  /// Локаль интерфейса по умолчанию (`ru` | `en`).
+  locale       String   @default("ru")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([email])
+}

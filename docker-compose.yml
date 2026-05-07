@@ -1,0 +1,65 @@
+# =============================================================================
+# Skinly — docker-compose
+# - postgres: всегда нужен и для local dev, и для prod
+# - web:      production-сборка приложения (за reverse-proxy на сервере)
+#
+# Локальная разработка:
+#   docker compose up -d postgres
+#   npm run dev
+#
+# Полный запуск (как на сервере):
+#   docker compose up -d --build
+# =============================================================================
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: skinly-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-skinly}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-skinly}
+      POSTGRES_DB: ${POSTGRES_DB:-skinly}
+    volumes:
+      - skinly-pg-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "pg_isready -U ${POSTGRES_USER:-skinly} -d ${POSTGRES_DB:-skinly}"
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - skinly-net
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: skinly-web
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-skinly}:${POSTGRES_PASSWORD:-skinly}@postgres:5432/${POSTGRES_DB:-skinly}?schema=public
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      AUTH_SECRET: ${AUTH_SECRET:-}
+      AUTH_URL: ${AUTH_URL:-http://localhost:3000}
+      FEATURE_AI_EXPLANATION: ${FEATURE_AI_EXPLANATION:-false}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      FEATURE_OPENBEAUTYFACTS: ${FEATURE_OPENBEAUTYFACTS:-false}
+    ports:
+      - "3000:3000"
+    networks:
+      - skinly-net
+
+volumes:
+  skinly-pg-data:
+
+networks:
+  skinly-net:
+    driver: bridge
