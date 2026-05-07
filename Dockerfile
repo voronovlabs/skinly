@@ -5,23 +5,36 @@
 # Использует output: "standalone" для минимального финального образа.
 # =============================================================================
 
-# --- Stage 1: deps — устанавливаем зависимости отдельно для лучшего кэша ---
+# --- Stage 1: deps ---
+#
+# Устанавливаем зависимости отдельным слоем для кэша.
+#
+# ВАЖНО: package.json содержит `"postinstall": "prisma generate"`.
+# Поэтому ДО `npm ci` обязательно копируем `prisma/` — иначе postinstall
+# падает с "Could not find Prisma Schema". Локальный `npm install` это не
+# трогает (prisma/ всегда лежит в репо), а layer-кэш почти не страдает:
+# `prisma/schema.prisma` меняется реже, чем код, и почти всегда вместе с
+# package.json (новые модели = новые миграции).
 FROM node:20-alpine AS deps
 RUN apk add --no-cache libc6-compat openssl
 WORKDIR /app
 COPY package.json package-lock.json* ./
-# Если lockfile есть — используем npm ci, иначе fallback на install (актуально на Phase 0).
+COPY prisma ./prisma
+# Если lockfile есть — используем npm ci, иначе fallback на install.
 RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 
-# --- Stage 2: builder — генерируем Prisma клиент и собираем Next ---
+# --- Stage 2: builder — собираем Next ---
+#
+# Prisma client уже сгенерирован postinstall'ом в deps. Запускаем `prisma
+# generate` ещё раз — идемпотентно и спасает, если кто-то поменял схему
+# после первого install'а в long-running CI.
 FROM node:20-alpine AS builder
 RUN apk add --no-cache libc6-compat openssl
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Prisma клиент должен быть сгенерирован до next build (RSC может его импортировать)
 RUN npx prisma generate
 
 ENV NEXT_TELEMETRY_DISABLED=1
