@@ -1,16 +1,21 @@
 # =============================================================================
 # Skinly — docker-compose (PRODUCTION-safe)
 #
-# - postgres: НЕ публикуется наружу. Доступен только web-контейнеру через
-#   internal network `skinly-net`. Так и должно быть на сервере.
-# - web:      слушает 3000 наружу, дальше его прокидывает Caddy/Nginx.
+# Сервисы:
+#   - postgres : НЕ публикуется наружу. Доступен только через internal network.
+#   - web      : production-сборка Next, слушает :3000 (за Caddy/Nginx).
+#   - migrate  : on-demand утилита для prisma CLI (migrate deploy / db seed /
+#                migrate status / studio). Не стартует с `up` — лежит под
+#                profile "tools". Использует stage `builder` Dockerfile'а,
+#                в котором уже есть полный node_modules с локальной prisma
+#                из package.json (а не v7 из npm registry).
 #
 # Запуск на сервере:
 #   docker compose up -d --build
+#   docker compose --profile tools run --rm migrate npx prisma migrate deploy
 #
-# Локальная разработка (хост подключается к postgres напрямую) —
-# используй docker-compose.dev.yml поверх (см. README или комментарий
-# в начале того файла).
+# Локальный dev (postgres на хосте + npx на хосте):
+#   см. docker-compose.dev.yml
 # =============================================================================
 
 services:
@@ -56,6 +61,28 @@ services:
       - "3000:3000"
     networks:
       - skinly-net
+
+  migrate:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    image: skinly-migrate:local
+    container_name: skinly-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-skinly}:${POSTGRES_PASSWORD:-skinly}@postgres:5432/${POSTGRES_DB:-skinly}?schema=public
+    working_dir: /app
+    networks:
+      - skinly-net
+    # Дефолт — подсказка. Реальные команды передаются через `run --rm`.
+    command:
+      - "sh"
+      - "-c"
+      - "echo 'Use: docker compose --profile tools run --rm migrate npx prisma <cmd>'"
 
 volumes:
   skinly-pg-data:
