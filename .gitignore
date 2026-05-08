@@ -51,3 +51,7 @@ prisma/dev.db-journal
 
 # Docker volumes
 /postgres-data
+
+# Scraper raw output (большие сырые данные не комитим)
+/data/raw/
+/data/state/

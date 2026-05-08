@@ -14,7 +14,8 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
-    "prisma:reset": "prisma migrate reset"
+    "prisma:reset": "prisma migrate reset",
+    "scrape:national-catalog": "tsx scripts/scrape-national-catalog.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.2.1",
@@ -37,7 +38,9 @@
     "postcss": "^8.5.1",
     "prisma": "^6.2.1",
     "tailwindcss": "^4.0.0",
-    "typescript": "^5.7.3"
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "cheerio": "^1.0.0"
   },
   "engines": {
     "node": ">=20.0.0"
