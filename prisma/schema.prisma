@@ -1,10 +1,15 @@
 // =============================================================================
 // Skinly — Prisma schema
 //
-// Phase 0: stub `HealthCheck`.
+// Phase 0: stub `HealthCheck` (удалён в 6.1.0).
 // Phase 4: User (email + bcrypt) для аутентификации.
-// Phase 6 добавит: SkinProfile, Product, Ingredient, ScanHistory, Favorite,
-// GuestSession, UserProductRating.
+// Phase 6.1.0 (текущая миграция — `phase6_domain`):
+//   + BeautyProfile, Product, Ingredient, ProductIngredient,
+//     Favorite, ScanHistory + enum'ы.
+//   - HealthCheck.
+//
+// Дальнейшие фичи (engine, AI, ratings, GuestSession persistence) —
+// в Phase 6.2+, отдельными миграциями.
 // =============================================================================
 
 generator client {
@@ -16,23 +21,212 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// Пинг-таблица для проверки соединения. Удалится в Phase 6.
-model HealthCheck {
-  id        String   @id @default(cuid())
-  note      String?
-  createdAt DateTime @default(now())
+// ─────────────────────────── enums ───────────────────────────
+
+enum SkinType {
+  DRY
+  OILY
+  COMBINATION
+  NORMAL
 }
 
+enum SensitivityLevel {
+  NONE
+  MILD
+  HIGH
+  REACTIVE
+}
+
+enum SkinConcern {
+  ACNE
+  AGING
+  PIGMENTATION
+  REDNESS
+  PORES
+  BLACKHEADS
+}
+
+enum AvoidedIngredient {
+  FRAGRANCE
+  ALCOHOL
+  SULFATES
+  PARABENS
+  ESSENTIAL_OILS
+}
+
+enum SkincareGoal {
+  CLEAR_SKIN
+  ANTI_AGING
+  HYDRATION
+  EVEN_TONE
+  MINIMAL_ROUTINE
+}
+
+enum IngredientSafety {
+  BENEFICIAL
+  NEUTRAL
+  CAUTION
+  DANGER
+}
+
+enum ProductCategory {
+  CLEANSER
+  TONER
+  ESSENCE
+  SERUM
+  MOISTURIZER
+  EYE_CREAM
+  SUNSCREEN
+  EXFOLIANT
+  MASK
+  MIST
+  OIL
+  LIP_CARE
+  TREATMENT
+  OTHER
+}
+
+// ─────────────────────────── User ───────────────────────────
+
 /// Зарегистрированный пользователь.
+/// Поле `locale` остаётся `String` (не enum) — чтобы не делать risky data
+/// migration на проде. Перенос в enum можно сделать в отдельной фазе.
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
   passwordHash String
   name         String?
-  /// Локаль интерфейса по умолчанию (`ru` | `en`).
+  /// "ru" | "en"
   locale       String   @default("ru")
+
+  beautyProfile BeautyProfile?
+  favorites     Favorite[]
+  scans         ScanHistory[]
+
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   @@index([email])
+}
+
+// ─────────────────────────── BeautyProfile (1:1 User) ───────────────────────────
+
+/// Профиль кожи. Один на пользователя; удаляется каскадом при удалении user'а.
+model BeautyProfile {
+  id          String              @id @default(cuid())
+  userId      String              @unique
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  skinType    SkinType
+  sensitivity SensitivityLevel
+  concerns    SkinConcern[]
+  avoidedList AvoidedIngredient[]
+  goal        SkincareGoal
+  /// 0..100 — индикатор заполненности анкеты.
+  completion  Int                 @default(0)
+
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+}
+
+// ─────────────────────────── Product / Ingredient ───────────────────────────
+
+model Product {
+  id            String              @id @default(cuid())
+  /// EAN-13 / UPC-A
+  barcode       String              @unique
+  brand         String
+  name          String
+  category      ProductCategory     @default(OTHER)
+  emoji         String?
+  imageUrl      String?
+
+  descriptionRu String?
+  descriptionEn String?
+
+  /// "seed" | "openbeautyfacts" | "manual"
+  source        String              @default("seed")
+  externalId    String?
+
+  ingredients   ProductIngredient[]
+  scans         ScanHistory[]
+  favorites     Favorite[]
+
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@index([brand, name])
+  @@index([category])
+}
+
+model Ingredient {
+  id            String              @id @default(cuid())
+  /// Каноническое INCI-имя (Latin), например `Niacinamide`.
+  inci          String              @unique
+  displayNameRu String
+  displayNameEn String
+  descriptionRu String?
+  descriptionEn String?
+
+  safety        IngredientSafety    @default(NEUTRAL)
+
+  /// "Избегаемые" пользователем флаги, которые этот ингредиент задевает.
+  flagsAvoided  AvoidedIngredient[]
+  /// Концерны, для которых ингредиент полезен.
+  benefitsFor   SkinConcern[]
+  /// Концерны, при которых требуется осторожность.
+  cautionsFor   SkinConcern[]
+
+  productLinks  ProductIngredient[]
+
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+}
+
+/// Junction Product↔Ingredient с порядком в составе.
+model ProductIngredient {
+  productId     String
+  ingredientId  String
+  /// 1 — первый по списку INCI.
+  position      Int
+  /// концентрация в %, если известна.
+  concentration Decimal?    @db.Decimal(5, 2)
+
+  product       Product     @relation(fields: [productId],    references: [id], onDelete: Cascade)
+  ingredient    Ingredient  @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+
+  @@id([productId, ingredientId])
+  @@index([ingredientId])
+  @@index([productId, position])
+}
+
+// ─────────────────────────── User ↔ Product ───────────────────────────
+
+model Favorite {
+  id        String   @id @default(cuid())
+  userId    String
+  productId String
+  createdAt DateTime @default(now())
+
+  user      User    @relation(fields: [userId],    references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+  @@index([userId, createdAt])
+  @@index([productId])
+}
+
+model ScanHistory {
+  id         String   @id @default(cuid())
+  userId     String
+  productId  String
+  /// Snapshot match-score в момент скана (от engine).
+  matchScore Int      @default(0)
+  scannedAt  DateTime @default(now())
+
+  user       User    @relation(fields: [userId],    references: [id], onDelete: Cascade)
+  product    Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([userId, scannedAt(sort: Desc)])
+  @@index([productId])
 }
