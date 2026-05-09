@@ -15,3 +15,5 @@ export {
 } from "./server";
 
 export { hashPassword, verifyPassword } from "./password";
+
+export { getCurrentUser, getCurrentSessionStrict } from "./current-user";

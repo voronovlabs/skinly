@@ -8,25 +8,47 @@ import { useDemoStore } from "@/lib/demo-store";
 /**
  * SkinProfileCard — компактная сводка профиля кожи на /profile.
  *
- * Phase 5: данные из demo store. Если профиль не заполнен — показываем
- * соответствующий placeholder.
+ * Phase 9: source-of-truth dual-mode:
+ *   - если передан `profile` prop (server-data из BeautyProfile) — рендерим его
+ *   - если нет — fallback на demo store (как было в Phase 5)
+ *
+ * Серверный профиль перед передачей сюда нормализован к lowercase enum
+ * keys (skinTypes.dry, sensitivities.high) — те же ключи, что в i18n
+ * messages, и совпадает с demo-store-форматом.
  */
 
+export interface SkinProfileSummary {
+  skinType: string | null;
+  sensitivity: string | null;
+  concerns: string[];
+  avoidedList: string[];
+  goal: string | null;
+  completion: number;
+}
+
 export interface SkinProfileCardProps {
+  /**
+   * Если передано (включая `null` = пользователь без профиля) — используем
+   * это и игнорируем demo store. Если `undefined` — берём demo store.
+   */
+  profile?: SkinProfileSummary | null;
   className?: string;
 }
 
-export function SkinProfileCard({ className }: SkinProfileCardProps) {
+export function SkinProfileCard({ profile, className }: SkinProfileCardProps) {
   const t = useTranslations("profile");
   const tDash = useTranslations("dashboard");
   const { state, hydrated } = useDemoStore();
-  const profile = state.skinProfile;
 
-  if (!hydrated) {
+  // Источник: server-prop > demo store
+  const usingServer = profile !== undefined;
+  const source = usingServer ? profile : state.skinProfile;
+
+  if (!usingServer && !hydrated) {
     return <Card className={cn("h-[140px]", className)} aria-busy />;
   }
 
-  if (!profile?.skinType) {
+  if (!source?.skinType) {
     return (
       <Card className={cn(className)}>
         <p className="text-body-sm text-muted-graphite">
@@ -37,25 +59,22 @@ export function SkinProfileCard({ className }: SkinProfileCardProps) {
   }
 
   const concernsValue =
-    profile.concerns.length === 0
+    source.concerns.length === 0
       ? "—"
-      : profile.concerns.map((c) => t(`concernLabels.${c}`)).join(", ");
+      : source.concerns.map((c) => t(`concernLabels.${c}`)).join(", ");
 
   const avoidedValue =
-    profile.avoidedList.length === 0
+    source.avoidedList.length === 0
       ? "—"
-      : profile.avoidedList.map((a) => t(`avoidedLabels.${a}`)).join(", ");
+      : source.avoidedList.map((a) => t(`avoidedLabels.${a}`)).join(", ");
 
   return (
     <Card className={cn("space-y-2", className)}>
-      <Row
-        label={t("skinType")}
-        value={t(`skinTypes.${profile.skinType}`)}
-      />
-      {profile.sensitivity && (
+      <Row label={t("skinType")} value={t(`skinTypes.${source.skinType}`)} />
+      {source.sensitivity && (
         <Row
           label={t("sensitivity")}
-          value={t(`sensitivities.${profile.sensitivity}`)}
+          value={t(`sensitivities.${source.sensitivity}`)}
         />
       )}
       <Row label={t("concerns")} value={concernsValue} />

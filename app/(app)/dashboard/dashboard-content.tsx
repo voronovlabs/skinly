@@ -14,20 +14,35 @@ import {
   MOCK_RECOMMENDATION_IDS,
   MOCK_USER,
 } from "@/lib/mock";
+import type { ScanRecord } from "@/lib/types";
+import type { SkinProfileSummary } from "@/components/profile/skin-profile-card";
 
 /**
- * DashboardContent — клиентский контент главной.
+ * DashboardContent — клиент.
  *
- * Phase 5:
- *   - skin-profile teaser читает demo store (профиль) или показывает
- *     CTA на анкету;
- *   - "Recent scans" берутся из demo store (`state.history`);
- *   - рекомендации остаются мокаными — это маркетинговый блок.
+ * Phase 9: dual-mode.
+ *   - mode="user" → читает props (server-fetched из ScanHistory + BeautyProfile).
+ *   - mode="guest" → читает demo store (Phase 5 — localStorage).
+ *
+ * Recommendations пока остаются мокаными — это маркетинговый блок
+ * (Phase 10 заменит на персонализированные рекомендации из engine).
  */
 
 const DASHBOARD_RECENT_LIMIT = 3;
 
-export function DashboardContent() {
+export interface DashboardContentProps {
+  mode: "user" | "guest";
+  serverScans?: ScanRecord[];
+  serverProfile?: SkinProfileSummary | null;
+  greetingName?: string | null;
+}
+
+export function DashboardContent({
+  mode,
+  serverScans,
+  serverProfile,
+  greetingName,
+}: DashboardContentProps) {
   const t = useTranslations("dashboard");
   const { state, hydrated } = useDemoStore();
 
@@ -35,23 +50,29 @@ export function DashboardContent() {
     MOCK_RECOMMENDATION_IDS.includes(p.id),
   );
 
-  const recent = useMemo(
-    () => demoScansToScanRecords(state.history).slice(0, DASHBOARD_RECENT_LIMIT),
-    [state.history],
-  );
+  // Источники данных
+  const recent = useMemo<ScanRecord[]>(() => {
+    if (mode === "user") return (serverScans ?? []).slice(0, DASHBOARD_RECENT_LIMIT);
+    return demoScansToScanRecords(state.history).slice(0, DASHBOARD_RECENT_LIMIT);
+  }, [mode, serverScans, state.history]);
 
-  const skinProfile = state.skinProfile;
-  const hasProfile = Boolean(skinProfile?.skinType);
-  const completion = skinProfile?.completion ?? 0;
+  const profile = mode === "user" ? serverProfile : state.skinProfile;
+  const hasProfile = Boolean(profile?.skinType);
+  const completion = profile?.completion ?? 0;
+
+  // Когда показывать empty state. Для user — серверные данные уже есть;
+  // для guest — ждём гидратации demo store, чтобы не мигало.
+  const ready = mode === "user" || hydrated;
 
   return (
     <ScreenContainer withBottomNav>
-      {/* Header */}
       <header className="px-6 pt-6 pb-2 bg-gradient-to-b from-warm-white to-transparent">
         <div className="mb-2 flex items-center justify-between">
           <div>
             <p className="text-caption text-muted-graphite">{t("greeting")}</p>
-            <h1 className="text-h1 text-graphite mt-1">{t("yourOverview")}</h1>
+            <h1 className="text-h1 text-graphite mt-1">
+              {greetingName ?? t("yourOverview")}
+            </h1>
           </div>
           <Link
             href="/profile"
@@ -64,12 +85,10 @@ export function DashboardContent() {
         <Tag tone="premium">💡 {t("weatherTip")}</Tag>
       </header>
 
-      {/* Scan CTA */}
       <div className="px-6 mt-4 mb-6">
         <ScanCard />
       </div>
 
-      {/* Recommendations */}
       <SectionHeader
         title={t("recommendations")}
         actionHref="/favorites"
@@ -81,7 +100,6 @@ export function DashboardContent() {
         ))}
       </div>
 
-      {/* Recent scans */}
       <SectionHeader
         title={t("recentScans")}
         actionHref="/history"
@@ -89,7 +107,7 @@ export function DashboardContent() {
         className="mt-8"
       />
       <div className="px-6 space-y-3">
-        {hydrated && recent.length === 0 && <RecentScansEmpty />}
+        {ready && recent.length === 0 && <RecentScansEmpty />}
         {recent.map((scan) => (
           <Card
             key={scan.id}
@@ -102,7 +120,6 @@ export function DashboardContent() {
         ))}
       </div>
 
-      {/* Skin profile teaser */}
       <SectionHeader title={t("yourProfile")} className="mt-8" />
       <div className="px-6">
         <Card>

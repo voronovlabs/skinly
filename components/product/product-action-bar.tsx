@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Heart, Layers, Plus } from "lucide-react";
 import { buttonClassName } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { useDemoStore } from "@/lib/demo-store";
+import { toggleFavoriteAction } from "@/app/actions/favorites";
+import { recordScanAction } from "@/app/actions/scans";
 
 /**
  * ProductActionBar — нижняя зафиксированная панель на /product/[id].
@@ -14,12 +17,17 @@ import { useDemoStore } from "@/lib/demo-store";
  * Phase 5:
  *   - heart toggle добавляет/убирает продукт в demo store favorites;
  *   - plus toggle — в compare-list;
- *   - на mount: записываем «просмотр» в history, чтобы и переход через
- *     сканер, и переход через избранное/историю формировали историю.
- *     Дедуп 30 секунд предотвращает повторные записи при ре-рендере.
+ *   - на mount: записываем «просмотр» в demo store (history),
+ *     чтобы и переход через сканер, и переход через избранное/историю
+ *     формировали историю. Дедуп 30 секунд внутри reducer'а.
  *
- * Phase 6: source может быть как mock-Product, так и DB-Product. Поэтому
- * принимаем минимальную форму — только `id`.
+ * Phase 9 (server persistence):
+ *   - Toggle favorite + view scan дублируется через server action.
+ *     Для guest action no-op; для user идёт upsert/insert в БД.
+ *     UI оптимистичен — БД синхронится в фоне.
+ *   - После toggle делаем `router.refresh()`, чтобы серверные страницы
+ *     (/favorites, /history, /dashboard) подтянули свежее состояние,
+ *     если пользователь зашёл по ним повторно.
  */
 
 export interface ProductActionBarProps {
@@ -28,17 +36,41 @@ export interface ProductActionBarProps {
 
 export function ProductActionBar({ product }: ProductActionBarProps) {
   const t = useTranslations("product");
-  const { addScan, toggleFavorite, toggleCompare, isFavorite, isInCompare, hydrated } =
-    useDemoStore();
+  const router = useRouter();
+  const [, startTransition] = useTransition();
 
-  // record on view (with 30s dedupe in reducer)
+  const {
+    addScan,
+    toggleFavorite,
+    toggleCompare,
+    isFavorite,
+    isInCompare,
+    hydrated,
+  } = useDemoStore();
+
+  // record on view: demo store (instant) + DB (для user'а)
   useEffect(() => {
     if (!hydrated) return;
     addScan(product.id);
-  }, [hydrated, product.id, addScan]);
+    startTransition(async () => {
+      await recordScanAction(product.id, 0);
+    });
+    // intentionally one-shot per mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, product.id]);
 
   const fav = isFavorite(product.id);
   const cmp = isInCompare(product.id);
+
+  const handleToggleFavorite = () => {
+    // optimistic — demo store
+    toggleFavorite(product.id);
+    // sync — server action (no-op для guest)
+    startTransition(async () => {
+      await toggleFavoriteAction(product.id);
+      router.refresh();
+    });
+  };
 
   return (
     <footer
@@ -51,7 +83,7 @@ export function ProductActionBar({ product }: ProductActionBarProps) {
         type="button"
         aria-pressed={fav}
         aria-label={fav ? t("removeFavorite") : t("addFavorite")}
-        onClick={() => toggleFavorite(product.id)}
+        onClick={handleToggleFavorite}
         className={cn(
           buttonClassName({
             variant: "secondary",

@@ -12,6 +12,14 @@ import {
 } from "@/components/profile";
 import { LogoutButton } from "@/components/auth";
 import { MOCK_USER } from "@/lib/mock";
+import { getCurrentUser } from "@/lib/auth";
+import { getBeautyProfileByUserId } from "@/lib/db/repositories/beauty-profile";
+import {
+  averageMatchScoreByUser,
+  countDistinctProductsByUser,
+  countScansByUser,
+} from "@/lib/db/repositories/scan-history";
+import type { SkinProfileSummary } from "@/components/profile/skin-profile-card";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations("profile");
@@ -20,16 +28,62 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function ProfilePage() {
   const t = await getTranslations("profile");
-  const user = MOCK_USER;
+  const dbUser = await getCurrentUser();
+
+  // Профиль шапки — DB User или mock (для guest)
+  const headerUser = dbUser
+    ? {
+        name: dbUser.name,
+        email: dbUser.email,
+        avatarEmoji: MOCK_USER.avatarEmoji, // emoji-аватар пока не храним
+        plan: "free" as const,
+      }
+    : {
+        name: MOCK_USER.name,
+        email: MOCK_USER.email,
+        avatarEmoji: MOCK_USER.avatarEmoji,
+        plan: MOCK_USER.plan,
+      };
+
+  // Server-side: BeautyProfile + stats для user; null/undefined — guest fallback
+  let skinProfile: SkinProfileSummary | null | undefined = undefined;
+  let stats: { scans: number; products: number; avgMatch: number } | undefined =
+    undefined;
+
+  if (dbUser) {
+    try {
+      const bp = await getBeautyProfileByUserId(dbUser.id);
+      skinProfile = bp
+        ? {
+            skinType: bp.skinType.toLowerCase(),
+            sensitivity: bp.sensitivity.toLowerCase(),
+            concerns: bp.concerns.map((c) => c.toLowerCase()),
+            avoidedList: bp.avoidedList.map((a) => a.toLowerCase()),
+            goal: bp.goal.toLowerCase(),
+            completion: bp.completion,
+          }
+        : null;
+
+      const [scans, products, avgMatch] = await Promise.all([
+        countScansByUser(dbUser.id),
+        countDistinctProductsByUser(dbUser.id),
+        averageMatchScoreByUser(dbUser.id),
+      ]);
+      stats = { scans, products, avgMatch };
+    } catch (e) {
+      console.error("[profile/page] DB load failed:", e);
+      // skinProfile/stats остаются undefined → клиент возьмёт demo store
+    }
+  }
 
   return (
     <ScreenContainer withBottomNav>
-      <ProfileHeader user={user} />
+      <ProfileHeader user={headerUser} />
 
-      {/* Skin profile (читает demo store) */}
+      {/* Skin profile (server-data для user, demo store для guest) */}
       <section className="border-b border-soft-beige px-6 py-6">
         <h3 className="text-h3 text-graphite mb-3">{t("skinProfileTitle")}</h3>
-        <SkinProfileCard className="mb-3" />
+        <SkinProfileCard profile={skinProfile} className="mb-3" />
         <Link
           href="/onboarding"
           className={buttonClassName({ variant: "secondary" })}
@@ -38,10 +92,10 @@ export default async function ProfilePage() {
         </Link>
       </section>
 
-      {/* Stats (считаются из demo store) */}
+      {/* Stats */}
       <section className="border-b border-soft-beige px-6 py-6">
         <h3 className="text-h3 text-graphite mb-3">{t("statistics")}</h3>
-        <StatsRow />
+        <StatsRow stats={stats} />
       </section>
 
       {/* Preferences */}
@@ -50,7 +104,7 @@ export default async function ProfilePage() {
         <PreferencesSection />
       </section>
 
-      {/* Demo controls */}
+      {/* Demo controls (полезно и для user'а — стереть локальный кэш) */}
       <section className="border-b border-soft-beige px-6 py-6 space-y-3">
         <h3 className="text-h3 text-graphite">{t("demoSection")}</h3>
         <p className="text-body-sm text-muted-graphite">
@@ -68,9 +122,6 @@ export default async function ProfilePage() {
           {t("privacy")}
         </Button>
         <LogoutButton label={t("logout")} />
-        <p className="text-caption text-light-graphite text-center pt-2">
-          {t("phaseNote")}
-        </p>
       </section>
     </ScreenContainer>
   );

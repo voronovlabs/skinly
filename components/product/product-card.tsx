@@ -45,9 +45,12 @@ export function ProductCard({ product, layout = "fluid", className }: ProductCar
       <div className="text-body-sm text-graphite mb-2 line-clamp-2 min-h-[2.6em]">
         {product.name}
       </div>
-      <Tag tone="success">
-        {product.matchScore}% {t("match")}
-      </Tag>
+      {/* Phase 9: matchScore=0 → engine ещё не включён; не показываем бейдж */}
+      {product.matchScore > 0 && (
+        <Tag tone="success">
+          {product.matchScore}% {t("match")}
+        </Tag>
+      )}
     </Link>
   );
 }

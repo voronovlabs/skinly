@@ -1,14 +1,22 @@
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/cn";
 import { Tag } from "@/components/ui";
-import type { UserProfile } from "@/lib/types";
 
 /**
  * ProfileHeader — верх /profile: avatar, имя, email, бейдж плана.
+ *
+ * Phase 9: упрощён до серверо-нейтральной формы — принимает минимальный
+ * объект без зависимостей от mock-типов. Подходит как для DB-User, так и
+ * для гостевого MOCK_USER.
  */
 
 export interface ProfileHeaderProps {
-  user: UserProfile;
+  user: {
+    name: string | null;
+    email: string;
+    avatarEmoji: string;
+    plan: "free" | "pro";
+  };
   className?: string;
 }
 
@@ -32,7 +40,7 @@ export function ProfileHeader({ user, className }: ProfileHeaderProps) {
       >
         {user.avatarEmoji}
       </div>
-      <h2 className="text-h2 text-graphite">{user.name}</h2>
+      <h2 className="text-h2 text-graphite">{user.name ?? user.email}</h2>
       <p className="text-body-sm text-muted-graphite">{user.email}</p>
       <Tag tone="active" className="mt-4">
         {user.plan === "free" ? t("freePlan") : t("proPlan")}

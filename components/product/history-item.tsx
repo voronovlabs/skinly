@@ -57,9 +57,11 @@ export function HistoryItem({ scan, divider = false, className }: HistoryItemPro
           {scan.product.brand} · {relativeLabel}
         </div>
       </div>
-      <div className={cn("text-base font-semibold", matchColorClass)}>
-        {scan.product.matchScore}%
-      </div>
+      {scan.product.matchScore > 0 && (
+        <div className={cn("text-base font-semibold", matchColorClass)}>
+          {scan.product.matchScore}%
+        </div>
+      )}
     </Link>
   );
 }

@@ -6,16 +6,29 @@ import { StatCard } from "./stat-card";
 import { computeDemoStats, useDemoStore } from "@/lib/demo-store";
 
 /**
- * StatsRow — три карточки статистики, считаются из demo store.
- *   - Сканов: длина history
- *   - Продуктов: уникальные productId в history
- *   - Средняя совместимость: среднее matchScore по уникальным продуктам
+ * StatsRow — три метрики на /profile.
+ *
+ * Phase 9: dual-mode:
+ *   - если переданы `stats` (server-counted из ScanHistory) — берём их
+ *   - иначе — считаем из demo store (как Phase 5)
  */
-export function StatsRow() {
+
+export interface StatsRowStats {
+  scans: number;
+  products: number;
+  avgMatch: number;
+}
+
+export interface StatsRowProps {
+  stats?: StatsRowStats;
+}
+
+export function StatsRow({ stats: serverStats }: StatsRowProps) {
   const t = useTranslations("profile");
   const { state } = useDemoStore();
 
-  const stats = useMemo(() => computeDemoStats(state), [state]);
+  const fallback = useMemo(() => computeDemoStats(state), [state]);
+  const stats = serverStats ?? fallback;
 
   return (
     <div className="flex gap-3">

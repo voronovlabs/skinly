@@ -55,3 +55,4 @@ prisma/dev.db-journal
 # Scraper raw output (большие сырые данные не комитим)
 /data/raw/
 /data/state/
+/data/debug/

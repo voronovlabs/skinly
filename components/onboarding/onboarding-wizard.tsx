@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { ChevronLeft } from "lucide-react";
@@ -8,6 +8,7 @@ import { Button, ProgressBar } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { useDemoStore } from "@/lib/demo-store";
 import type { DemoSkinProfile } from "@/lib/demo-store";
+import { upsertBeautyProfileAction } from "@/app/actions/profile";
 import type {
   AvoidedIngredient,
   OnboardingQuestionDef,
@@ -20,8 +21,13 @@ import type {
 /**
  * OnboardingWizard — 5-шаговый wizard профиля кожи.
  *
- * Phase 5: ответы конвертируются в `DemoSkinProfile` и сохраняются в demo store
- * (localStorage). И на «Готово», и на «Пропустить» — пишем то, что уже выбрано.
+ * Phase 5: пишем в demo store (localStorage).
+ * Phase 9 (server persistence): дополнительно вызываем
+ *   upsertBeautyProfileAction(...) — для авторизованного user'а action
+ *   запишет в `BeautyProfile`. Для guest'а action возвращает no-op.
+ *
+ * Сохранение происходит и на «Готово», и на «Пропустить» — то, что уже
+ * выбрано, не теряется.
  */
 
 type Answers = Record<string, string[]>;
@@ -40,6 +46,7 @@ export function OnboardingWizard({
   const router = useRouter();
   const t = useTranslations("onboarding");
   const { setSkinProfile } = useDemoStore();
+  const [pending, startTransition] = useTransition();
 
   const [stepIdx, setStepIdx] = useState(0);
   const [answers, setAnswers] = useState<Answers>({});
@@ -75,7 +82,28 @@ export function OnboardingWizard({
   };
 
   const persistAndExit = (target: string) => {
-    setSkinProfile(answersToSkinProfile(answers, totalSteps));
+    const profile = answersToSkinProfile(answers, totalSteps);
+    // 1. Optimistic — demo store (всегда, и для user, и для guest).
+    setSkinProfile(profile);
+
+    // 2. Синхронизация с БД (для guest action — no-op). Не блокирует UX:
+    //    если БД упала, profile уже в demo store + UI открывает /dashboard.
+    if (profile.skinType && profile.sensitivity && profile.goal) {
+      const dbInput = {
+        skinType: profile.skinType.toUpperCase() as SkinType_DB,
+        sensitivity: profile.sensitivity.toUpperCase() as SensitivityLevel_DB,
+        concerns: profile.concerns.map((c) => c.toUpperCase()) as SkinConcern_DB[],
+        avoidedList: profile.avoidedList.map((a) =>
+          a.toUpperCase(),
+        ) as AvoidedIngredient_DB[],
+        goal: profile.goal.toUpperCase() as SkincareGoal_DB,
+        completion: profile.completion,
+      };
+      startTransition(async () => {
+        await upsertBeautyProfileAction(dbInput);
+      });
+    }
+
     router.push(target);
   };
 
@@ -167,7 +195,7 @@ export function OnboardingWizard({
         <Button
           variant="primary"
           onClick={handleContinue}
-          disabled={!canContinue}
+          disabled={!canContinue || pending}
         >
           {stepIdx === totalSteps - 1 ? t("complete") : t("continue")}
         </Button>
@@ -190,3 +218,29 @@ function answersToSkinProfile(
     completion: Math.round((filled / totalSteps) * 100),
   };
 }
+
+/* ───────── DB enum aliases ───────── */
+// Алиасы Prisma-енумов (uppercase). Не импортим из @prisma/client тут,
+// чтобы клиентский бандл не тянул серверные типы; полагаемся на server
+// action для типобезопасности fully.
+type SkinType_DB = "DRY" | "OILY" | "COMBINATION" | "NORMAL";
+type SensitivityLevel_DB = "NONE" | "MILD" | "HIGH" | "REACTIVE";
+type SkinConcern_DB =
+  | "ACNE"
+  | "AGING"
+  | "PIGMENTATION"
+  | "REDNESS"
+  | "PORES"
+  | "BLACKHEADS";
+type AvoidedIngredient_DB =
+  | "FRAGRANCE"
+  | "ALCOHOL"
+  | "SULFATES"
+  | "PARABENS"
+  | "ESSENTIAL_OILS";
+type SkincareGoal_DB =
+  | "CLEAR_SKIN"
+  | "ANTI_AGING"
+  | "HYDRATION"
+  | "EVEN_TONE"
+  | "MINIMAL_ROUTINE";
