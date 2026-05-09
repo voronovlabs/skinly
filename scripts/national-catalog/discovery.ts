@@ -1,20 +1,23 @@
 /**
  * Discovery: BFS обход категорий → набор product-URL'ов.
  *
- * Эвристика:
- *   - URL должен matches один из COSMETIC_CATEGORY_PREFIXES (не только root!).
- *     Это потому что у националкаталог.рф подкатегории живут как top-level
- *     пути (`/parfyumeriya/`, `/kosmetika/`...), а не вложены в root.
- *   - заканчивается на "/" → category
- *   - содержит "?page=" → pagination (тоже category)
- *   - содержит другой "?" (фильтр/сортировка) → reject
- *   - НЕ заканчивается на "/" → product detail page
+ * Архитектура matching'а:
+ *   - PRODUCT URLs живут на хостовом prefix'е `/product/<barcode>-<slug>`
+ *     и НЕ находятся под path'ом косметической категории.
+ *   - CATEGORY URLs — топ-левел пути из allowlist'а COSMETIC_CATEGORY_PREFIXES
+ *     (`/parfyumeriya/`, `/kosmetika/` и т.п.).
+ *   - Поэтому /product/... принимаем по своему регулярному правилу,
+ *     а cosmetic-prefix используем ТОЛЬКО для category/subcategory обхода.
+ *
+ * BFS «доверяет» странице по категории:
+ *   queue стартует с ROOT_CATEGORY_PATH, в queue добавляются только URL'ы из
+ *   cosmetic-allowlist'а — значит мы посещаем только cosmetic-страницы.
+ *   На каждой такой странице любые /product/<barcode>-... → safe-to-accept.
  *
  * DEBUG MODE (`--debug`):
- *   - Дампит первую страницу как `data/debug/root.html`
- *   - Сохраняет ВСЕ ссылки в `data/debug/root-links.txt` с классификацией
- *   - В stdout: total, accepted, top reasons rejection, первые 30 accepted
- *   - Эвристически детектит CSR
+ *   - root.html и root-links.txt в data/debug/
+ *   - в stdout: top rejection reasons, первые 20 product-ссылок с barcode
+ *   - CSR detection
  */
 
 import * as cheerio from "cheerio";
@@ -27,6 +30,16 @@ import {
 } from "./config";
 import { fetchHtml } from "./fetcher";
 import { writeDebug } from "./storage";
+
+/* ───────── URL helpers ───────── */
+
+/**
+ * Регулярка product-URL.
+ *   /product/6294021903684-ru-genius-hayati-parfyumernaya-voda-25-ml
+ *   ───────  ─────────────
+ *    prefix   barcode (8..14 digits)
+ */
+const PRODUCT_PATH_REGEX = /^\/product\/(\d{8,14})(?:[-/]|$)/;
 
 function absolutize(href: string, base: string = BASE_URL): string | null {
   try {
@@ -45,29 +58,42 @@ function pathOnly(absoluteUrl: string): string | null {
   }
 }
 
+function pathnameOnly(absoluteUrl: string): string | null {
+  try {
+    return new URL(absoluteUrl).pathname;
+  } catch {
+    return null;
+  }
+}
+
 function isPagination(p: string): boolean {
-  return p.includes("?page=") || /[?&]p=\d+/.test(p);
+  return p.includes("?page=") || /[?&]p=\d+\b/.test(p);
 }
 
 function hasUnwantedQuery(p: string): boolean {
-  // фильтры/сортировки/utm — игнорируем, чтобы не плодить дубликаты
   if (!p.includes("?")) return false;
   if (isPagination(p)) return false;
   return true;
 }
 
-function isCategory(p: string): boolean {
+function isProductPath(p: string): boolean {
+  // Проверяем по pathname без query/fragment
+  const idx = p.indexOf("?");
+  const pathname = idx >= 0 ? p.slice(0, idx) : p;
+  return PRODUCT_PATH_REGEX.test(pathname);
+}
+
+function extractBarcode(p: string): string | null {
+  const idx = p.indexOf("?");
+  const pathname = idx >= 0 ? p.slice(0, idx) : p;
+  const m = pathname.match(PRODUCT_PATH_REGEX);
+  return m ? m[1] : null;
+}
+
+function isCategoryPath(p: string): boolean {
   if (!matchesCosmeticPrefix(p)) return false;
   if (hasUnwantedQuery(p)) return false;
   return p.endsWith("/") || isPagination(p);
-}
-
-function isProduct(p: string): boolean {
-  if (!matchesCosmeticPrefix(p)) return false;
-  if (p.endsWith("/")) return false;
-  if (p.includes("?")) return false;
-  const tail = p.split("/").filter(Boolean).pop() ?? "";
-  return tail.length > 0;
 }
 
 /* ───────── CSR detection ───────── */
@@ -111,6 +137,8 @@ interface ClassifiedLink {
   pathOnly: string | null;
   classification: "category" | "product" | "rejected";
   reason: string;
+  /** Только для product. */
+  barcode?: string | null;
 }
 
 function classifyHref(href: string, baseUrl: string): ClassifiedLink {
@@ -125,7 +153,8 @@ function classifyHref(href: string, baseUrl: string): ClassifiedLink {
     };
   }
   const p = pathOnly(abs);
-  if (!p) {
+  const pn = pathnameOnly(abs);
+  if (!p || !pn) {
     return {
       href,
       abs,
@@ -134,50 +163,56 @@ function classifyHref(href: string, baseUrl: string): ClassifiedLink {
       reason: "no path",
     };
   }
-  if (!matchesCosmeticPrefix(p)) {
-    // первое слово пути — для красивого reason
-    const head = "/" + (p.split("/").filter(Boolean)[0] ?? "");
+
+  // 1) Product — самый специфичный матч, проверяем первым.
+  if (isProductPath(pn)) {
     return {
       href,
       abs,
-      pathOnly: p,
-      classification: "rejected",
-      reason: `not cosmetic prefix (head=${head})`,
-    };
-  }
-  if (hasUnwantedQuery(p)) {
-    return {
-      href,
-      abs,
-      pathOnly: p,
-      classification: "rejected",
-      reason: "filter/sort query string",
-    };
-  }
-  if (isProduct(p)) {
-    return {
-      href,
-      abs,
-      pathOnly: p,
+      pathOnly: pn, // для продуктов всегда сохраняем pathname без query
       classification: "product",
-      reason: "leaf URL under cosmetic prefix",
+      reason: "matches /product/<barcode>",
+      barcode: extractBarcode(pn),
     };
   }
-  if (isCategory(p)) {
+
+  // 2) Category — только из allowlist'а, чтобы не уходить в /produkty/, /odezhda/ и т.п.
+  if (matchesCosmeticPrefix(p)) {
+    if (hasUnwantedQuery(p)) {
+      return {
+        href,
+        abs,
+        pathOnly: p,
+        classification: "rejected",
+        reason: "filter/sort query string",
+      };
+    }
+    if (p.endsWith("/") || isPagination(p)) {
+      return {
+        href,
+        abs,
+        pathOnly: p,
+        classification: "category",
+        reason: isPagination(p) ? "pagination" : "trailing slash",
+      };
+    }
     return {
       href,
       abs,
       pathOnly: p,
-      classification: "category",
-      reason: isPagination(p) ? "pagination" : "trailing slash",
+      classification: "rejected",
+      reason: "cosmetic-prefix without trailing slash (likely deprecated link)",
     };
   }
+
+  // 3) Прочее — отбрасываем с причиной.
+  const head = "/" + (pn.split("/").filter(Boolean)[0] ?? "");
   return {
     href,
     abs,
     pathOnly: p,
     classification: "rejected",
-    reason: "unmatched shape",
+    reason: `not /product/<barcode>; outside cosmetic allowlist (head=${head})`,
   };
 }
 
@@ -214,7 +249,6 @@ async function dumpRootDebug(
 
   const topReasons = [...rejReasons.entries()].sort((a, b) => b[1] - a[1]);
 
-  // root-links.txt
   const lines: string[] = [];
   lines.push(`# Skinly · National Catalog discovery debug`);
   lines.push(`# pageUrl: ${pageUrl}`);
@@ -244,8 +278,9 @@ async function dumpRootDebug(
 
   lines.push("## First 30 accepted (product/category)");
   for (const c of acceptedSamples) {
+    const tag = c.barcode ? ` [barcode=${c.barcode}]` : "";
     lines.push(
-      `[${c.classification.padEnd(8)}] ${c.pathOnly?.slice(0, 90) ?? c.href}  ← ${c.reason}`,
+      `[${c.classification.padEnd(8)}]${tag} ${c.pathOnly?.slice(0, 90) ?? c.href}  ← ${c.reason}`,
     );
   }
   lines.push("");
@@ -267,7 +302,10 @@ async function dumpRootDebug(
 
   log(`[debug] first ${acceptedSamples.length} accepted links:`);
   for (const c of acceptedSamples) {
-    log(`  [${c.classification}] ${c.pathOnly?.slice(0, 90)}  ← ${c.reason}`);
+    const tag = c.barcode ? ` [barcode=${c.barcode}]` : "";
+    log(
+      `  [${c.classification}]${tag} ${c.pathOnly?.slice(0, 90)}  ← ${c.reason}`,
+    );
   }
 
   if (csr.likelyCsr) {
@@ -282,7 +320,7 @@ interface DiscoveryOptions {
   limit: number;
   log: (msg: string) => void;
   debug?: boolean;
-  /** Игнорировать allowlist, акцептить вообще всё (отладочный fallback). */
+  /** Игнорировать allowlist категорий, акцептить вообще всё (отладочный fallback). */
   unsafeAcceptAll?: boolean;
 }
 
@@ -301,7 +339,11 @@ export async function discoverProducts(
   const products = new Set<string>();
   const categories = new Set<string>();
 
+  /** Лог первых N продуктов глобально (по всему BFS). */
+  const productsSampleForLog: { path: string; barcode: string | null }[] = [];
+
   let pagesVisited = 0;
+  let totalProductDuplicatesSkipped = 0;
   let csrAnalysis: DiscoveryStats["csrAnalysis"];
   let rootDumped = false;
 
@@ -319,7 +361,7 @@ export async function discoverProducts(
 
     pagesVisited++;
     opts.log(
-      `[discovery] [${pagesVisited}/${MAX_CATEGORY_PAGES_VISITED}] visit ${current} (queue=${queue.length}, products=${products.size})`,
+      `[discovery] [${pagesVisited}/${MAX_CATEGORY_PAGES_VISITED}] visit ${current} (queue=${queue.length}, products=${products.size}/${opts.limit})`,
     );
 
     let html: string;
@@ -345,30 +387,36 @@ export async function discoverProducts(
       .get()
       .filter(Boolean);
 
-    let foundProductsHere = 0;
+    let rawProductLinksHere = 0;
+    let newProductsHere = 0;
+    let duplicateProductsHere = 0;
     let foundCategoriesHere = 0;
     let rejectedHere = 0;
-    const rejReasonsHere = new Map<string, number>();
 
     for (const href of anchors) {
       const c = classifyHref(href, fullUrl);
 
-      if (opts.unsafeAcceptAll) {
-        if (c.pathOnly && !c.pathOnly.endsWith("/") && !c.pathOnly.includes("?")) {
-          if (!products.has(c.pathOnly)) {
-            products.add(c.pathOnly);
-            foundProductsHere++;
-          }
-          continue;
+      if (opts.unsafeAcceptAll && c.pathOnly && c.classification !== "category") {
+        if (!products.has(c.pathOnly)) {
+          products.add(c.pathOnly);
+          newProductsHere++;
         }
+        continue;
       }
 
       if (c.classification === "product" && c.pathOnly) {
-        if (!products.has(c.pathOnly)) {
-          products.add(c.pathOnly);
-          foundProductsHere++;
-          if (products.size >= opts.limit) break;
+        rawProductLinksHere++;
+        if (products.has(c.pathOnly)) {
+          duplicateProductsHere++;
+          totalProductDuplicatesSkipped++;
+          continue;
         }
+        products.add(c.pathOnly);
+        newProductsHere++;
+        if (productsSampleForLog.length < 20) {
+          productsSampleForLog.push({ path: c.pathOnly, barcode: c.barcode ?? null });
+        }
+        if (products.size >= opts.limit) break;
       } else if (
         c.classification === "category" &&
         c.pathOnly &&
@@ -380,12 +428,6 @@ export async function discoverProducts(
         queue.push(c.pathOnly);
       } else {
         rejectedHere++;
-        if (c.classification === "rejected") {
-          rejReasonsHere.set(
-            c.reason,
-            (rejReasonsHere.get(c.reason) ?? 0) + 1,
-          );
-        }
       }
     }
 
@@ -409,27 +451,23 @@ export async function discoverProducts(
     }
 
     opts.log(
-      `[discovery]   total <a>=${anchors.length} | +${foundProductsHere} products, +${foundCategoriesHere} sub-pages, ${rejectedHere} rejected`,
+      `[discovery]   total <a>=${anchors.length} | /product/ raw=${rawProductLinksHere}, +${newProductsHere} new, ${duplicateProductsHere} dup | +${foundCategoriesHere} sub-pages | ${rejectedHere} rejected`,
     );
+  }
 
-    // На root, если ни одной accepted — печатаем краткое why
-    if (
-      pagesVisited === 1 &&
-      foundProductsHere === 0 &&
-      foundCategoriesHere === 0
-    ) {
-      opts.log(
-        `[discovery] ⚠️  на root-странице 0 accepted. Топ rejection reasons:`,
-      );
-      const top = [...rejReasonsHere.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5);
-      for (const [r, n] of top) opts.log(`           ${n} × ${r}`);
-      opts.log(
-        `           см. data/debug/root-links.txt — там полный список ссылок`,
-      );
+  // Итоговый лог: показываем первые до 20 product-ссылок (полезно для глаз)
+  if (productsSampleForLog.length > 0) {
+    opts.log(
+      `[discovery] first ${productsSampleForLog.length} discovered products:`,
+    );
+    for (const p of productsSampleForLog) {
+      opts.log(`           barcode=${p.barcode ?? "—"}  ${p.path}`);
     }
   }
+
+  opts.log(
+    `[discovery] DONE pages=${pagesVisited}, categories=${categories.size}, products=${products.size}, dupSkipped=${totalProductDuplicatesSkipped}`,
+  );
 
   return {
     urls: Array.from(products).slice(0, opts.limit),
