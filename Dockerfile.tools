@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1.7
+#
+# Skinly · tools image
+#
+# Лёгкий Node.js-образ только с project dependencies + prisma CLI + tsx.
+# Используется для:
+#   - prisma migrate deploy / status / resolve
+#   - prisma db seed
+#   - scrapers (scripts/scrape-*.ts)
+#   - любых ad-hoc скриптов
+#
+# При запуске scripts/, prisma/ и data/ маунтятся с хоста как volumes
+# (см. docker-compose.yml service `tools`) — поэтому правки скриптов и
+# схемы НЕ требуют rebuild'а образа.
+#
+# Когда нужно ребилдить:
+#   - изменили package.json / package-lock.json
+#   - изменили prisma/schema.prisma и хотите свежий prisma client
+#     (postinstall перегенерирует клиент в /app/node_modules/.prisma)
+#
+# Build:
+#   docker compose --profile tools build tools
+#
+# Use:
+#   docker compose --profile tools run --rm tools npx prisma migrate status
+#   docker compose --profile tools run --rm tools npx prisma migrate deploy
+#   docker compose --profile tools run --rm tools npx prisma db seed
+#   docker compose --profile tools run --rm tools npm run scrape:national-catalog -- --limit 20
+
+FROM node:20-alpine
+
+RUN apk add --no-cache libc6-compat openssl
+
+WORKDIR /app
+
+# Полный install (включая devDeps: prisma CLI, tsx, cheerio).
+# postinstall = `prisma generate`, поэтому prisma/ должен быть на месте до npm ci.
+COPY package.json package-lock.json* ./
+COPY prisma ./prisma
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+# Дефолтная команда — подсказка. Реальные команды передаются через
+# `docker compose --profile tools run --rm tools <cmd>`.
+CMD ["sh", "-c", "echo 'Usage: docker compose --profile tools run --rm tools <command>'"]

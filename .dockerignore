@@ -6,7 +6,9 @@ node_modules
 .env*.local
 README.md
 Dockerfile
+Dockerfile.tools
 docker-compose.yml
+docker-compose.dev.yml
 .dockerignore
 .DS_Store
 .vscode
@@ -15,3 +17,9 @@ coverage
 *.log
 index.html
 CLAUDE.md
+
+# tools-only / scraper-only — НЕ должны попадать в build context web-образа.
+# Tools-образ их тоже не копирует (они монтируются volume'ом во время `run`).
+# Это исключает rebuild web при правке скрейпера.
+scripts
+data

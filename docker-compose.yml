@@ -2,17 +2,29 @@
 # Skinly — docker-compose (PRODUCTION-safe)
 #
 # Сервисы:
-#   - postgres : НЕ публикуется наружу. Доступен только через internal network.
+#   - postgres : НЕ публикуется наружу. Доступен только по internal network.
 #   - web      : production-сборка Next, слушает :3000 (за Caddy/Nginx).
-#   - migrate  : on-demand утилита для prisma CLI (migrate deploy / db seed /
-#                migrate status / studio). Не стартует с `up` — лежит под
-#                profile "tools". Использует stage `builder` Dockerfile'а,
-#                в котором уже есть полный node_modules с локальной prisma
-#                из package.json (а не v7 из npm registry).
+#                Использует Dockerfile (multi-stage standalone).
+#                В build context'е НЕТ scripts/ и data/ (.dockerignore) —
+#                правки скрейпера не триггерят rebuild web.
+#   - tools    : on-demand box для prisma CLI и скрейперов.
+#                Использует отдельный Dockerfile.tools (lightweight image
+#                с node + project deps). scripts/, prisma/, data/ маунтятся
+#                volume'ом с хоста — правки скриптов и схемы НЕ требуют
+#                rebuild'а. Под profile "tools" — `up -d` его не стартует.
 #
-# Запуск на сервере:
+# Запуск на сервере (только web + postgres):
 #   docker compose up -d --build
-#   docker compose --profile tools run --rm migrate npx prisma migrate deploy
+#
+# Применить миграции:
+#   docker compose --profile tools run --rm tools npx prisma migrate deploy
+#
+# Засеять БД:
+#   docker compose --profile tools run --rm tools npx prisma db seed
+#
+# Запустить скрейпер:
+#   docker compose --profile tools run --rm tools \
+#     npm run scrape:national-catalog -- --limit 20
 #
 # Локальный dev (postgres на хосте + npx на хосте):
 #   см. docker-compose.dev.yml
@@ -62,27 +74,33 @@ services:
     networks:
       - skinly-net
 
-  migrate:
+  tools:
     profiles: ["tools"]
     build:
       context: .
-      dockerfile: Dockerfile
-      target: builder
-    image: skinly-migrate:local
-    container_name: skinly-migrate
+      dockerfile: Dockerfile.tools
+    image: skinly-tools:local
+    container_name: skinly-tools
+    init: true
     depends_on:
       postgres:
         condition: service_healthy
     environment:
+      NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-skinly}:${POSTGRES_PASSWORD:-skinly}@postgres:5432/${POSTGRES_DB:-skinly}?schema=public
+      # Включаем colored output Prisma внутри docker run -it
+      FORCE_COLOR: "1"
     working_dir: /app
+    volumes:
+      # Скрипты и схема — read-only маунт с хоста. Любая правка scripts/
+      # или prisma/ видна сразу, без rebuild'а. Read-only защищает от
+      # случайной модификации репо изнутри контейнера.
+      - ./scripts:/app/scripts:ro
+      - ./prisma:/app/prisma:ro
+      # Куда скрейпер пишет JSONL и checkpoint. Должна быть writable.
+      - ./data:/app/data
     networks:
       - skinly-net
-    # Дефолт — подсказка. Реальные команды передаются через `run --rm`.
-    command:
-      - "sh"
-      - "-c"
-      - "echo 'Use: docker compose --profile tools run --rm migrate npx prisma <cmd>'"
 
 volumes:
   skinly-pg-data:
