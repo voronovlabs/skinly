@@ -3,10 +3,14 @@
 //
 // Phase 0: stub `HealthCheck` (удалён в 6.1.0).
 // Phase 4: User (email + bcrypt) для аутентификации.
-// Phase 6.1.0 (текущая миграция — `phase6_domain`):
+// Phase 6.1.0 (миграция — `phase6_domain`):
 //   + BeautyProfile, Product, Ingredient, ProductIngredient,
 //     Favorite, ScanHistory + enum'ы.
 //   - HealthCheck.
+// Phase 6.1.1 (миграция — `raw_national_catalog`):
+//   + NationalCatalogRawProduct — raw ingestion layer для скрейпера.
+//     Это сырые JSON-payload'ы; нормализация в Product/Ingredient
+//     происходит отдельной фазой и НЕ трогает эту таблицу.
 //
 // Дальнейшие фичи (engine, AI, ratings, GuestSession persistence) —
 // в Phase 6.2+, отдельными миграциями.
@@ -229,4 +233,30 @@ model ScanHistory {
 
   @@index([userId, scannedAt(sort: Desc)])
   @@index([productId])
+}
+
+// ─────────────────────────── Raw ingestion ───────────────────────────
+
+/// Сырой payload товара, как пришёл со скрейпера (JSONL → JSON).
+/// Не имеет ни FK, ни связей с Product/Ingredient — это enrichment-слой.
+/// Нормализатор (отдельная фаза) читает эту таблицу и заполняет основной
+/// каталог Product/Ingredient/ProductIngredient.
+model NationalCatalogRawProduct {
+  id        String   @id @default(cuid())
+  /// "national_catalog" (на будущее можно добавить openbeautyfacts и т.д.)
+  source    String
+  /// Канонический URL детальной страницы. Уникален → используется как ключ upsert'а.
+  sourceUrl String   @unique
+  /// EAN-13 / UPC-A, если удалось извлечь. Может быть null.
+  barcode   String?
+  /// Полный JSONL-объект ScrapedProduct (categoryPath, characteristics, flatAttributes, ...).
+  payload   Json
+  /// Время скрейпа (из payload.scrapedAt).
+  scrapedAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([barcode])
+  @@index([source])
+  @@index([scrapedAt(sort: Desc)])
 }

@@ -46,4 +46,8 @@ export interface ScrapeStats {
   productsWithoutAttributes: number;
   duplicatesSkipped: number;
   failures: number;
+  /** Успешный upsert в Postgres (NationalCatalogRawProduct). */
+  rawUpsertOk: number;
+  /** Ошибка upsert в Postgres — товар всё равно есть в JSONL. */
+  rawUpsertFail: number;
 }
