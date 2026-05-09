@@ -7,10 +7,9 @@ import { Heart, Layers, Plus } from "lucide-react";
 import { buttonClassName } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { useDemoStore } from "@/lib/demo-store";
-import type { Product } from "@/lib/types";
 
 /**
- * ProductActionBar — нижняя зафиксированная панель на /product/[barcode].
+ * ProductActionBar — нижняя зафиксированная панель на /product/[id].
  *
  * Phase 5:
  *   - heart toggle добавляет/убирает продукт в demo store favorites;
@@ -18,10 +17,13 @@ import type { Product } from "@/lib/types";
  *   - на mount: записываем «просмотр» в history, чтобы и переход через
  *     сканер, и переход через избранное/историю формировали историю.
  *     Дедуп 30 секунд предотвращает повторные записи при ре-рендере.
+ *
+ * Phase 6: source может быть как mock-Product, так и DB-Product. Поэтому
+ * принимаем минимальную форму — только `id`.
  */
 
 export interface ProductActionBarProps {
-  product: Product;
+  product: { id: string };
 }
 
 export function ProductActionBar({ product }: ProductActionBarProps) {
