@@ -15,7 +15,8 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "prisma:reset": "prisma migrate reset",
-    "scrape:national-catalog": "tsx scripts/scrape-national-catalog.ts"
+    "scrape:national-catalog": "tsx scripts/scrape-national-catalog.ts",
+    "normalize:national-catalog": "tsx scripts/normalize-national-catalog.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.2.1",
