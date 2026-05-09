@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@prisma/client": "^6.2.1",
+    "@zxing/browser": "^0.1.5",
     "bcryptjs": "^3.0.2",
     "jose": "^5.9.6",
     "lucide-react": "^0.471.1",

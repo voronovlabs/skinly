@@ -19,27 +19,30 @@ import { AnalyzingOverlay } from "./analyzing-overlay";
 /**
  * ScannerView — реальный barcode-сканер.
  *
- * Источники данных (по убыванию приоритета):
- *   1) Camera + Browser BarcodeDetector API (Chromium на Android, иногда iOS)
- *   2) Manual input — поле "ввести штрихкод" + "Найти" (всегда доступно)
- *   3) Demo Simulate (если переданы demoBarcodes) — для презентаций
+ * Engines (по убыванию приоритета):
+ *   1) native — `BarcodeDetector` (Chromium, Android Chrome, Edge).
+ *      Быстрее и легче, бандл не растёт.
+ *   2) zxing  — lazy `import("@zxing/browser")` для iOS Safari / WebKit-
+ *      браузеров, где BarcodeDetector отсутствует. Чанк подтягивается
+ *      только когда нужен — в bundle web-страниц не попадает.
+ *   3) manual — поле «введите штрихкод вручную» — всегда видно как fallback.
  *
- * После ввода / распознавания вызываем server action `getProductByBarcodeAction`:
- *   - found  → router.push("/product/" + barcode)
- *   - not_found / invalid / db_unavailable → подсказка пользователю
+ * После decode:
+ *   getProductByBarcodeAction → router.push("/product/<barcode>") при found,
+ *   иначе баннер «не найден».
  *
- * Cleanup:
- *   - камера: stop tracks при unmount или при успешном детекте
- *   - детектор: clearInterval()
+ * Cleanup на unmount / успешный найденный товар:
+ *   - native: clearInterval + stop tracks
+ *   - zxing:  controls.stop() (он же останавливает stream)
  */
 
-const BARCODE_FORMATS = ["ean_13", "ean_8", "upc_a", "upc_e"] as const;
-const DETECT_INTERVAL_MS = 350;
+const NATIVE_FORMATS = ["ean_13", "ean_8", "upc_a", "upc_e"] as const;
+const NATIVE_DETECT_INTERVAL_MS = 350;
 
 type CameraState =
   | { kind: "idle" }
   | { kind: "starting" }
-  | { kind: "live" }
+  | { kind: "live"; engine: "native" | "zxing" }
   | { kind: "denied" }
   | { kind: "unsupported" }
   | { kind: "error"; message: string };
@@ -63,21 +66,30 @@ export function ScannerView({ demoBarcodes = [] }: ScannerViewProps) {
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const detectorRef = useRef<unknown>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  /** flag, чтобы не запускать lookup в параллели (внутри детект-loop'а). */
+  /** Экземпляр {@link IScannerControls} от ZXing — есть только в режиме zxing. */
+  const zxingControlsRef = useRef<{ stop: () => void } | null>(null);
+  /** Lock против гонок detect-loop и manual-submit. */
   const lockRef = useRef(false);
 
   const [camera, setCamera] = useState<CameraState>({ kind: "idle" });
   const [lookup, setLookup] = useState<LookupState>({ kind: "idle" });
   const [manualValue, setManualValue] = useState("");
 
-  /* ───────── cleanup ───────── */
+  /* ───────── cleanup (унифицированно для обоих движков) ───────── */
 
   const stopCamera = useCallback(() => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
+    }
+    if (zxingControlsRef.current) {
+      try {
+        zxingControlsRef.current.stop();
+      } catch {
+        /* noop */
+      }
+      zxingControlsRef.current = null;
     }
     streamRef.current?.getTracks().forEach((tr) => tr.stop());
     streamRef.current = null;
@@ -86,7 +98,7 @@ export function ScannerView({ demoBarcodes = [] }: ScannerViewProps) {
     }
   }, []);
 
-  /* ───────── lookup → redirect / not_found ───────── */
+  /* ───────── lookup → redirect / banner ───────── */
 
   const handleBarcode = useCallback(
     async (raw: string) => {
@@ -98,9 +110,7 @@ export function ScannerView({ demoBarcodes = [] }: ScannerViewProps) {
       try {
         const result = await getProductByBarcodeAction(barcode);
         if (result.found) {
-          // снимаем камеру до навигации, чтобы не висел поток
           stopCamera();
-          // demo-store: пишем "просмотр" по тому же id, что и /product
           addScan(result.productId);
           router.push(`/product/${result.barcode}`);
           return;
@@ -108,7 +118,7 @@ export function ScannerView({ demoBarcodes = [] }: ScannerViewProps) {
         if (result.reason === "invalid") {
           setLookup({ kind: "invalid" });
         } else if (result.reason === "not_found") {
-          // Phase 5 demo fallback — продукта может не быть в БД, но быть в mock
+          // Phase 5 demo fallback
           const mock = findProductByBarcode(barcode);
           if (mock) {
             stopCamera();
@@ -124,7 +134,6 @@ export function ScannerView({ demoBarcodes = [] }: ScannerViewProps) {
         console.error("[scanner] lookup failed:", e);
         setLookup({ kind: "error" });
       } finally {
-        // через секунду снимаем lock — позволяем пользователю ещё раз
         setTimeout(() => {
           lockRef.current = false;
         }, 800);
@@ -133,31 +142,36 @@ export function ScannerView({ demoBarcodes = [] }: ScannerViewProps) {
     [addScan, router, stopCamera],
   );
 
-  /* ───────── camera + detector ───────── */
+  /* ───────── engine setup ───────── */
 
   useEffect(() => {
     let cancelled = false;
 
     async function start() {
-      // Pre-flight: BarcodeDetector доступен?
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCamera({ kind: "unsupported" });
+        return;
+      }
+
+      // Engine 1: native BarcodeDetector
       const BD =
         (typeof globalThis !== "undefined" &&
           (globalThis as unknown as { BarcodeDetector?: BarcodeDetectorCtor })
             .BarcodeDetector) ||
         null;
 
-      if (!BD) {
-        setCamera({ kind: "unsupported" });
+      if (BD) {
+        await startNative(BD);
         return;
       }
 
-      if (!navigator.mediaDevices?.getUserMedia) {
-        setCamera({ kind: "unsupported" });
-        return;
-      }
+      // Engine 2: ZXing fallback (iOS WebKit и пр.)
+      await startZxing();
+    }
 
+    /* ── Native ── */
+    async function startNative(BD: BarcodeDetectorCtor) {
       setCamera({ kind: "starting" });
-
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
@@ -175,54 +189,98 @@ export function ScannerView({ demoBarcodes = [] }: ScannerViewProps) {
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          // play() может бросить в Safari, ловим тихо
           videoRef.current.play().catch(() => undefined);
         }
 
-        // создаём детектор (с фильтром форматов, иначе ловит QR и т.п.)
+        let detector: { detect: (s: HTMLVideoElement) => Promise<DetectedCode[]> };
         try {
-          detectorRef.current = new BD({
-            formats: BARCODE_FORMATS as unknown as string[],
-          });
+          detector = new BD({ formats: NATIVE_FORMATS as unknown as string[] });
         } catch {
-          // если конкретный формат не поддерживается — попытаемся без фильтра
-          detectorRef.current = new BD();
+          detector = new BD();
         }
 
-        setCamera({ kind: "live" });
+        setCamera({ kind: "live", engine: "native" });
 
         intervalRef.current = setInterval(async () => {
-          const detector = detectorRef.current as
-            | { detect: (s: HTMLVideoElement) => Promise<DetectedCode[]> }
-            | null;
           const video = videoRef.current;
-          if (!detector || !video || video.readyState < 2 || lockRef.current)
-            return;
-
+          if (!video || video.readyState < 2 || lockRef.current) return;
           try {
             const results = await detector.detect(video);
             if (results && results.length > 0) {
               const code = results[0]?.rawValue;
-              if (code) {
-                await handleBarcode(code);
-              }
+              if (code) await handleBarcode(code);
             }
           } catch {
-            // транзиентные ошибки detect() игнорируем — следующая итерация
+            /* транзиентные ошибки detect() */
           }
-        }, DETECT_INTERVAL_MS);
+        }, NATIVE_DETECT_INTERVAL_MS);
       } catch (e) {
-        const err = e as DOMException;
-        if (
-          err?.name === "NotAllowedError" ||
-          err?.name === "PermissionDeniedError"
-        ) {
-          setCamera({ kind: "denied" });
-        } else if (err?.name === "NotFoundError") {
-          setCamera({ kind: "error", message: "no camera" });
-        } else {
-          setCamera({ kind: "error", message: err?.message ?? "unknown" });
+        handleCameraError(e);
+      }
+    }
+
+    /* ── ZXing ── */
+    async function startZxing() {
+      setCamera({ kind: "starting" });
+      try {
+        // Lazy: чанк ZXing подтянется только если до сюда дошли.
+        const { BrowserMultiFormatReader } = await import("@zxing/browser");
+        if (cancelled) return;
+
+        const video = videoRef.current;
+        if (!video) {
+          setCamera({ kind: "error", message: "no video element" });
+          return;
         }
+
+        const reader = new BrowserMultiFormatReader();
+
+        const controls = await reader.decodeFromConstraints(
+          {
+            video: {
+              facingMode: { ideal: "environment" },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+            audio: false,
+          },
+          video,
+          (result) => {
+            if (!result || lockRef.current) return;
+            const text = result.getText();
+            if (text) void handleBarcode(text);
+          },
+        );
+
+        if (cancelled) {
+          controls.stop();
+          return;
+        }
+
+        zxingControlsRef.current = controls;
+        // ZXing присвоил поток сам — заберём ref на cleanup parity.
+        const attached = video.srcObject as MediaStream | null;
+        if (attached) streamRef.current = attached;
+
+        setCamera({ kind: "live", engine: "zxing" });
+      } catch (e) {
+        // Может быть: NotAllowedError (permission denied), failed import,
+        // unsupported by ZXing (очень старый браузер).
+        handleCameraError(e);
+      }
+    }
+
+    function handleCameraError(e: unknown) {
+      const err = e as { name?: string; message?: string };
+      if (
+        err?.name === "NotAllowedError" ||
+        err?.name === "PermissionDeniedError"
+      ) {
+        setCamera({ kind: "denied" });
+      } else if (err?.name === "NotFoundError") {
+        setCamera({ kind: "error", message: "no camera" });
+      } else {
+        setCamera({ kind: "error", message: err?.message ?? "unknown" });
       }
     }
 
@@ -231,7 +289,6 @@ export function ScannerView({ demoBarcodes = [] }: ScannerViewProps) {
       cancelled = true;
       stopCamera();
     };
-    // handleBarcode стабилен (useCallback), stopCamera тоже
   }, [handleBarcode, stopCamera]);
 
   /* ───────── manual input ───────── */
@@ -417,7 +474,7 @@ export function ScannerView({ demoBarcodes = [] }: ScannerViewProps) {
   );
 }
 
-/* ───────── tiny types for BarcodeDetector ───────── */
+/* ───────── tiny types for native BarcodeDetector ───────── */
 
 interface DetectedCode {
   rawValue: string;
