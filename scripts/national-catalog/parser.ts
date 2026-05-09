@@ -82,6 +82,27 @@ function extractKeyValue($: Cheerio$, $scope: Scope): Record<string, string> {
   return out;
 }
 
+/**
+ * Извлекает barcode (8–14 цифр) из URL вида
+ * `https://.../product/4660243673834-ru-talk-dlya-depilyacii...`.
+ * Тот же regex, что в discovery.ts — единый источник истины формата.
+ */
+const PRODUCT_BARCODE_FROM_URL = /\/product\/(\d{8,14})(?:[-/]|$)/;
+
+function extractBarcodeFromSourceUrl(sourceUrl: string): string | null {
+  // Сначала пробуем парсить URL — это даст pathname без query/hash, на случай
+  // если ?utm=… подцеплено к URL'у. Если URL не валидный (мало ли что в строке),
+  // просто matches на raw-строку.
+  let pathname = sourceUrl;
+  try {
+    pathname = new URL(sourceUrl).pathname;
+  } catch {
+    /* fallthrough: используем raw */
+  }
+  const m = pathname.match(PRODUCT_BARCODE_FROM_URL);
+  return m ? m[1] : null;
+}
+
 /** Ищет значение поля по «нечёткому» совпадению ключа. */
 function lookup(
   flat: Record<string, string>,
@@ -186,10 +207,15 @@ export function parseProductPage(
   }
 
   // ── Известные поля ──────────────────────────────────────
+  // Сначала пробуем достать barcode из HTML-атрибутов (самый «доверенный» источник).
+  // Если на странице его нет (часть товаров такие — либо рендерится JS'ом,
+  // либо просто не указано в паспорте) — fallback на /product/<barcode>… в URL.
+  // На националкаталог.рф URL канонический, поэтому fallback надёжный.
   const barcode =
     flatAttributes["Штрихкод"] ??
     flatAttributes["GTIN"] ??
-    lookup(flatAttributes, "штрихкод", "gtin");
+    lookup(flatAttributes, "штрихкод", "gtin") ??
+    extractBarcodeFromSourceUrl(sourceUrl);
 
   const brand =
     flatAttributes["Товарный знак"] ??
