@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { BottomNav, type BottomNavTab } from "@/components/layout";
+import { GuestMigrator } from "@/components/auth";
 
 /**
  * Layout для приватных экранов (Dashboard / History / Favorites / Profile).
@@ -9,6 +10,10 @@ import { BottomNav, type BottomNavTab } from "@/components/layout";
  *
  * /scan и /product/[barcode] лежат вне этой группы — у них свой UX (фуллскрин,
  * action-bar) и BottomNav им не нужен.
+ *
+ * Phase 11: <GuestMigrator /> сидит здесь невидимым компонентом.
+ *   - для guest action no-op'нет, ничего не происходит;
+ *   - для user'а на mount переносит demo state в БД и `router.refresh()`.
  */
 
 function tabFromPath(pathname: string): BottomNavTab {
@@ -28,6 +33,7 @@ export default function AppLayout({
     <>
       {children}
       <BottomNav active={tabFromPath(pathname)} />
+      <GuestMigrator />
     </>
   );
 }

@@ -1,6 +1,13 @@
+import Link from "next/link";
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
-import { GuestButton, StartOnboardingButton } from "@/components/auth";
+import {
+  GuestButton,
+  StartOnboardingButton,
+} from "@/components/auth";
+import { buttonClassName } from "@/components/ui";
+import { getCurrentSession } from "@/lib/auth";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations("welcome");
@@ -18,6 +25,13 @@ const STEP_ICONS: Record<(typeof VALUE_STEP_KEYS)[number], string> = {
 };
 
 export default async function WelcomePage() {
+  // Phase 11: уже залогиненного пользователя сразу пускаем в приложение —
+  // welcome ему не нужен, и он точно не должен повторно попасть в onboarding.
+  const session = await getCurrentSession();
+  if (session?.type === "user") {
+    redirect("/dashboard");
+  }
+
   const t = await getTranslations("welcome");
 
   return (
@@ -71,13 +85,19 @@ export default async function WelcomePage() {
       </section>
 
       {/*
-        Demo-режим: оба CTA создают гостевую сессию (без БД).
-          - "Начать — бесплатно"  → /onboarding (затем /dashboard)
-          - "Продолжить как гость" → сразу /dashboard
-        Регистрация и login доступны вручную через /register и /login.
+        Phase 11 — иерархия CTA:
+          PRIMARY:   "Начать бесплатно"   → guest session + onboarding
+          SECONDARY: "Войти"                → /login
+          TERTIARY:  "Продолжить как гость" → guest session + /dashboard
       */}
       <footer className="space-y-3">
         <StartOnboardingButton label={t("ctaStart")} />
+        <Link
+          href="/login"
+          className={buttonClassName({ variant: "secondary" })}
+        >
+          {t("ctaLogin")}
+        </Link>
         <GuestButton label={t("ctaGuest")} />
         <p className="pt-2 text-[11px] text-muted-graphite">{t("trustBar")}</p>
       </footer>

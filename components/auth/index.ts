@@ -6,3 +6,4 @@ export { LogoutButton } from "./logout-button";
 export type { LogoutButtonProps } from "./logout-button";
 export { StartOnboardingButton } from "./start-onboarding-button";
 export type { StartOnboardingButtonProps } from "./start-onboarding-button";
+export { GuestMigrator } from "./guest-migrator";

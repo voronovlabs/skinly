@@ -78,6 +78,7 @@
       }
     },
     "ctaStart": "Get started — free",
+    "ctaLogin": "Log in",
     "ctaGuest": "Continue as guest",
     "trustBar": "Powered by AI · 50,000+ products · Clean beauty focused"
   },
@@ -87,6 +88,21 @@
     "skip": "Skip",
     "continue": "Continue",
     "complete": "Complete",
+    "accountGate": {
+      "metaTitle": "Profile ready",
+      "title": "Your skin profile is ready ✨",
+      "subtitle": "Save results to:",
+      "benefits": {
+        "history": "keep your scan history",
+        "sync": "sync profile across devices",
+        "recommendations": "get personal recommendations"
+      },
+      "guestNoticeTitle": "You're in guest mode",
+      "guestNoticeBody": "Your profile is saved only in this browser and not tied to any account. Create an account to keep it safe.",
+      "ctaCreate": "Create account",
+      "ctaLogin": "I already have an account",
+      "ctaGuest": "Continue as guest"
+    },
     "questions": {
       "skinType": {
         "title": "What's your skin type?",

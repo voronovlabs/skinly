@@ -98,7 +98,14 @@ export async function registerAction(
     name: user.name,
   });
 
-  redirect("/onboarding");
+  // Phase 11: новый user идёт на /dashboard.
+  //   - если он пришёл с welcome → onboarding → gate → register, его guest
+  //     state переедет в БД через GuestMigrator на (app)/layout;
+  //   - если он попал на /register напрямую (без onboarding'а), на /dashboard
+  //     увидит CTA "Пройти анкету" и пройдёт её отдельно.
+  // Раньше тут был redirect("/onboarding") → новый user'ов гонял через
+  // wizard ещё раз поверх уже заполненного гостевого профиля.
+  redirect("/dashboard");
 }
 
 /* ───────── Login ───────── */

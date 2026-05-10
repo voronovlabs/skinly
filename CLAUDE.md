@@ -48,54 +48,139 @@ Compose).
 | 7 — Real scanner | Camera + BarcodeDetector + manual fallback | ✅ |
 | 7.1 — iOS scanner | @zxing/browser lazy fallback для WebKit | ✅ |
 | 8 — Production deploy | Caddy + Docker Compose, tools service, миграции через `migrate deploy` | ✅ |
-| **9 — Server persistence (текущая)** | Auth + Profile + Favorites + History в Postgres, dual-mode с guest fallback | ✅ |
+| 9 — Server persistence | Auth + Profile + Favorites + History в Postgres, dual-mode с guest fallback | ✅ |
+| **11 — Auth/Onboarding UX + Guest→User migration (текущая)** | 3-tier welcome CTA, account gate, soft migration localStorage → Postgres при register/login | ✅ |
 | 10 — Compatibility engine | Score + verdict + AI explanation (deterministic + Anthropic) | ⏳ |
-| 11 — Guest → user migration | Soft migration localStorage → Postgres при register/login | ⏳ |
 | 12 — PWA polish | Manifest, icons, offline cache | ⏳ |
 | 13 — Tests + CI | Vitest unit + Playwright e2e + GitHub Actions | ⏳ |
 
-## Текущая фаза (9) — Auth + Profile Server Persistence
+## Текущая фаза (11) — Auth/Onboarding UX + Guest → User migration
 
-Перевод user-data с localStorage на Postgres через server actions, без потери
-guest flow.
+Производственный auth/onboarding flow без потери guest mode. Без изменений
+Prisma schema — переиспользуем то, что появилось в Phase 9.
 
-### Что внутри
-
-**Repositories** (`lib/db/repositories/*`)
-- `user.ts` — getById, updateLocale, updateName
-- `beauty-profile.ts` — getByUserId, upsert
-- `favorite.ts` — list, isFavorite, toggle
-- `scan-history.ts` — list, record, getLast (для дедупа), counters
-
-**Server actions** (`app/actions/*`)
-- `profile.ts` — `upsertBeautyProfileAction`
-- `favorites.ts` — `toggleFavoriteAction`
-- `scans.ts` — `recordScanAction` (30 сек дедуп)
-- `auth.ts` (без изменений) — register / login / guest / logout
-- `locale.ts` — пишет cookie + дублирует в `User.locale` для user'а
-- `products.ts` (без изменений) — `getProductByBarcodeAction`
-
-**Pages dual-mode**
+### UX flow
 
 ```
-Server (RSC) определяет session:
-  user  → читает БД, рендерит client с props (mode="user")
-  guest → рендерит client с mode="guest" (data из demo store)
+NEW USER (full path):
+  /welcome
+    → [PRIMARY  ] "Начать бесплатно"   → guest session + /onboarding
+    → wizard (5 шагов) → save to demo store + DB upsert (no-op для гостя)
+    → /onboarding/complete   ← account gate
+    → [PRIMARY  ] "Создать аккаунт"     → /register
+    → registerAction       → user session + redirect /dashboard
+    → (app) layout mount  → <GuestMigrator /> → migrateGuestToUserAction
+    → router.refresh() → /dashboard уже с данными из БД
+
+EXISTING USER:
+  /welcome → middleware видит user-сессию → redirect /dashboard
+  ИЛИ
+  /welcome → [SECONDARY] "Войти" → /login → loginAction
+            → user session + redirect /dashboard
+            → (app) layout → <GuestMigrator /> (мерджит, если в браузере
+              остался прежний guest state)
+
+GUEST (без аккаунта, навсегда):
+  /welcome → [TERTIARY ] "Продолжить как гость"
+            → guest session + /dashboard
+  ИЛИ
+  /welcome → "Начать бесплатно" → onboarding → gate → "Продолжить как гость"
+            → /dashboard в guest-режиме (demo store source of truth)
 ```
 
-Покрыто: `/dashboard`, `/favorites`, `/history`, `/profile`.
+### CTA hierarchy на /welcome
 
-**Write-paths dual-mode**
+| Tier      | CTA                       | Действие                          |
+|-----------|---------------------------|-----------------------------------|
+| PRIMARY   | "Начать бесплатно"        | `startOnboardingAction` → guest session → `/onboarding` |
+| SECONDARY | "Войти"                   | `<Link href="/login">`             |
+| TERTIARY  | "Продолжить как гость"    | `loginAsGuestAction` → guest session → `/dashboard` |
 
-```
-guest → только demo store (localStorage)
-user  → demo store optimistic + server action (БД)
-```
+Залогиненный user не видит /welcome никогда (server-side `redirect("/dashboard")`
++ middleware).
 
-Покрыто: onboarding wizard, product action bar (favorite + scan recording),
-preferences (locale).
+### Account gate (`/onboarding/complete`)
 
-**Существующие модели не меняются** — schema.prisma после Phase 6 уже подходит.
+Промежуточный экран после finish'а wizard'а. Показывается **только гостю**:
+
+- Header: «Ваш skin profile готов ✨»
+- Bullets-преимущества аккаунта (history / sync / recommendations)
+- Warning-карточка: «Сейчас вы — гость, профиль сохранён только в браузере».
+- Три CTA: Создать аккаунт / Войти / Продолжить как гость.
+
+Залогиненный user, попав сюда, мгновенно редиректится на `/dashboard`
+(server-side `redirect`).
+
+### Маршрут wizard'а
+
+`/onboarding/page.tsx` решает finishHref по session:
+
+| session       | finishHref            |
+|---------------|-----------------------|
+| user          | `/dashboard`          |
+| guest / null  | `/onboarding/complete`|
+
+### Guest → user migration
+
+**Repository** (`lib/db/repositories/migration.ts`)
+- `migrateGuestStateToUser(userId, payload) → MigrationStats`
+- Идемпотентен: повторный запуск даёт нули.
+- Merge rules:
+  - `BeautyProfile`: импорт **только если** у user'а нет профиля или
+    `completion === 0`. Заполненный профиль user'а никогда не затирается.
+  - `Favorites`: skipDuplicates по `(userId, productId)`. Невалидные
+    `productId` (нет в `Product`) тихо отбрасываются.
+  - `ScanHistory`: skipDuplicates по `(productId, scannedAt сек)`.
+    Невалидные `productId` отбрасываются.
+  - `Locale`: пишем `User.locale` только если у user'а пусто или дефолт `"ru"`.
+
+**Server action** (`app/actions/migrate-guest.ts`)
+- `migrateGuestToUserAction(payload)` — single entry point.
+- Если session не user → `{ ok: false, reason: "not_user" }` (no-op).
+- Если БД упала → `{ ok: false, reason: "db_error" }`. Login/register
+  не ломаются: action вызывается **после** успешного auth, и его падение
+  логируется, но UI продолжает работать (guest data остаётся в demo store
+  как клиентский кэш, БД догонит при следующем write-action'е).
+
+**Trigger** (`components/auth/guest-migrator.tsx`)
+- Невидимый `<GuestMigrator />` в `app/(app)/layout.tsx`.
+- На mount после login/register:
+  1. ждёт hydration demo store'а;
+  2. если в demo store нет ни профиля, ни favorites, ни history → no-op;
+  3. иначе зовёт `migrateGuestToUserAction`;
+  4. на успех — `localStorage.setItem("skinly:migrated-for", userId)` +
+     `router.refresh()`, чтобы серверные RSC'и подтянули свежие данные.
+- Demo store **не сбрасывается** — он остаётся клиентским кэшем; серверные
+  страницы перезаписывают его при render'е.
+- Идемпотентность: ref-guard в компоненте + флаг в localStorage + идемпотентность
+  на уровне БД (migration repo).
+
+### Middleware (`middleware.ts`)
+
+- PROTECTED (`/dashboard`, `/history`, `/favorites`, `/profile`, `/scan`,
+  `/product`, `/onboarding`): нужна любая сессия (user или guest); без
+  сессии → `/welcome`.
+- USER-ONLY-REDIRECT (`/welcome`, `/login`, `/register`): user → `/dashboard`.
+  Guest проходит. **Это критично для gate flow** — guest должен иметь право
+  открыть `/register` и `/login`, иначе он не сможет создать настоящий аккаунт.
+
+### Robustness
+
+- Migration упала → login/register НЕ ломаются. Action вернёт
+  `{ ok: false, reason: "db_error" }`, GuestMigrator залогирует и тихо выйдет.
+  Demo store продолжает работать как кэш, БД догонит при первом действии.
+- DB upsert на onboarding finish упал → `await upsertBeautyProfileAction(...)`
+  не падает наружу (try/catch внутри action), wizard всё равно идёт на
+  finishHref.
+
+### Что НЕ менялось
+
+- Prisma schema (нет миграций для Phase 11).
+- Demo store / guest flow / scanner / product page / dashboard / favorites /
+  history / profile / i18n / session JWT — без изменений.
+- registerAction / loginAction — поведение прежнее, кроме того, что
+  registerAction редиректит на `/dashboard` (а не `/onboarding`),
+  потому что онбординг прошёл ДО register'а в gate flow.
 
 ## Архитектурные правила
 
@@ -112,8 +197,9 @@ preferences (locale).
 - Edge middleware (`middleware.ts`) проверяет cookie, без обращения к БД.
 - Защищённые префиксы: `/dashboard`, `/history`, `/favorites`, `/profile`,
   `/scan`, `/product`, `/onboarding`.
-- Auth-страницы (`/login`, `/register`) перенаправляют залогиненных на
-  `/dashboard`.
+- `/login`, `/register`, `/welcome` редиректят на `/dashboard` **только**
+  user'а; guest проходит насквозь — это нужно для онбординг → account gate
+  → register/login flow (Phase 11).
 
 ### Demo store
 - `DemoStoreProvider` обёрнут вокруг всего приложения (root layout).
@@ -133,16 +219,21 @@ preferences (locale).
 app/
 ├── (marketing)/     welcome/, preview/
 ├── (auth)/          login/, register/
-├── (onboarding)/    onboarding/
+├── (onboarding)/    onboarding/, onboarding/complete  ← account gate (guest only)
 ├── (app)/           dashboard, favorites, history, profile (защищённые, BottomNav)
+│                    + <GuestMigrator /> в layout
 ├── product/[barcode]/   /product/<id-or-barcode>
 ├── scan/            real BarcodeDetector + zxing fallback
-└── actions/         auth, profile, favorites, scans, products, locale
+└── actions/         auth, profile, favorites, scans, products, locale, migrate-guest
 
 lib/
 ├── auth/            session (jose JWT), server (cookies), password (bcrypt),
 │                    current-user, forms (типы для useActionState)
-├── db/              prisma, repositories/*, display (DB→view mappers)
+├── db/
+│   ├── prisma.ts
+│   ├── display/                DB → view mappers
+│   └── repositories/           user, beauty-profile, favorite, scan-history,
+│                                migration (Phase 11 — guest → user merge rules)
 ├── demo-store/      Phase 5 localStorage layer
 ├── i18n/            locale constants
 └── mock/            mock products + onboarding questions
@@ -152,7 +243,7 @@ components/
 │                    MatchRing, LanguageSwitcher
 ├── layout/          ScreenContainer, BottomNav
 ├── auth/            LoginForm, RegisterForm, GuestButton, LogoutButton,
-│                    StartOnboardingButton
+│                    StartOnboardingButton, GuestMigrator (Phase 11)
 ├── dashboard/       ScanCard, SectionHeader
 ├── product/         ProductCard, HistoryItem, IngredientCard, VerdictCard,
 │                    CompatibilityTable, ProductActionBar
