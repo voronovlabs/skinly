@@ -308,5 +308,91 @@
       "essential_oils": "Essential oils"
     },
     "phaseNote": "Phase 3 · auth coming in Phase 4"
+  },
+  "compatibility": {
+    "loading": "Calculating compatibility…",
+    "noProfile": "We need your skin profile to score this product.",
+    "noProfileCta": "Take the questionnaire →",
+    "lowConfidence": "Limited ingredient data — score is approximate.",
+    "breakdown": "Why this score",
+    "positivesTitle": "What works",
+    "warningsTitle": "Things to watch",
+    "verdicts": {
+      "excellent": "Excellent match",
+      "good": "Works for you",
+      "mixed": "Mixed — be careful",
+      "risky": "Likely not for you"
+    },
+    "subtitles": {
+      "excellent": "Aligned with your skin profile across the board.",
+      "good": "Generally compatible with your profile.",
+      "mixed": "Some benefits, but also some flags — proceed slowly.",
+      "risky": "This product clashes with your profile."
+    },
+    "tags": {
+      "beneficial": "Beneficial",
+      "neutral": "Neutral",
+      "caution": "Use carefully",
+      "danger": "Avoid"
+    },
+    "rows": {
+      "skinType": "Your skin type ({skinType})",
+      "sensitivity": "Sensitivity",
+      "concern": "Concern · {concern}",
+      "avoided": "Avoiding · {avoided}"
+    },
+    "captions": {
+      "compatible": "Compatible",
+      "supports": "Supports",
+      "treats": "Targets",
+      "patchTest": "Patch test recommended",
+      "warning": "Use carefully",
+      "incompatible": "Not for you",
+      "neutral": "Neutral"
+    },
+    "skinTypes": {
+      "dry": "dry",
+      "oily": "oily",
+      "combination": "combination",
+      "normal": "normal"
+    },
+    "concerns": {
+      "acne": "acne",
+      "aging": "aging",
+      "pigmentation": "dark spots",
+      "redness": "redness",
+      "pores": "pores",
+      "blackheads": "blackheads"
+    },
+    "avoided": {
+      "fragrance": "fragrance",
+      "alcohol": "alcohol",
+      "sulfates": "sulfates",
+      "parabens": "parabens",
+      "essential_oils": "essential oils"
+    },
+    "goals": {
+      "clear_skin": "clear skin",
+      "anti_aging": "anti-aging",
+      "hydration": "hydration",
+      "even_tone": "even tone",
+      "minimal_routine": "minimal routine"
+    },
+    "reasons": {
+      "avoidedFlag": "{ingredient} is on your avoided list ({avoided})",
+      "sensitiveTrigger": "{ingredient} can irritate sensitive skin",
+      "activeForSensitive": "{ingredient} is a strong active — patch test recommended",
+      "helpsConcern": "{ingredient} helps with {concern}",
+      "cautionForConcern": "{ingredient} may aggravate {concern}",
+      "dryFriendly": "{ingredient} hydrates and supports the skin barrier",
+      "dryStripping": "{ingredient} can be drying for dry skin",
+      "oilyHeavy": "{ingredient} is heavy for oily skin",
+      "oilyLightHydration": "{ingredient} is a light hydrator suited to oily skin",
+      "combinationComedogenic": "{ingredient} can clog pores in mixed zones",
+      "combinationBalanced": "{ingredient} balances combination skin",
+      "normalMaintenance": "{ingredient} supports a healthy skin baseline",
+      "goalAlignment": "{ingredient} aligns with your goal: {goal}",
+      "comedogenicForAcne": "{ingredient} may worsen breakouts"
+    }
   }
 }

@@ -3,21 +3,36 @@ import { useTranslations } from "next-intl";
 import { cn } from "@/lib/cn";
 import { Tag } from "@/components/ui";
 import type { Product } from "@/lib/types";
+import { LiveMatchBadge } from "./live-match-badge";
+import type { SkinProfileSummaryLike } from "@/lib/compatibility";
 
 /**
  * ProductCard — компактная карточка продукта.
  * Используется на Dashboard (горизонтальная карусель) и на /favorites (сетка 2x).
  *
- * Phase 3: бейдж "X% совместимости" — через `product.match` из i18n.
+ * Phase 10.1: если переданы `inciList` + `mode`, бейдж совместимости считается
+ * на лету через compatibility engine; иначе — fallback на `product.matchScore`
+ * (mock-каталог Phase 5 / БД-snapshot из ScanHistory).
  */
 
 export interface ProductCardProps {
   product: Product;
   layout?: "fixed" | "fluid";
   className?: string;
+  /** Если передан — бейдж совместимости считается через engine, не из mock. */
+  liveScoring?: {
+    mode: "user" | "guest";
+    inciList: ReadonlyArray<{ inci: string; position?: number }>;
+    serverProfile?: SkinProfileSummaryLike | null;
+  };
 }
 
-export function ProductCard({ product, layout = "fluid", className }: ProductCardProps) {
+export function ProductCard({
+  product,
+  layout = "fluid",
+  className,
+  liveScoring,
+}: ProductCardProps) {
   const t = useTranslations("product");
 
   return (
@@ -45,11 +60,18 @@ export function ProductCard({ product, layout = "fluid", className }: ProductCar
       <div className="text-body-sm text-graphite mb-2 line-clamp-2 min-h-[2.6em]">
         {product.name}
       </div>
-      {/* Phase 9: matchScore=0 → engine ещё не включён; не показываем бейдж */}
-      {product.matchScore > 0 && (
-        <Tag tone="success">
-          {product.matchScore}% {t("match")}
-        </Tag>
+      {liveScoring ? (
+        <LiveMatchBadge
+          mode={liveScoring.mode}
+          inciList={liveScoring.inciList}
+          serverProfile={liveScoring.serverProfile}
+        />
+      ) : (
+        product.matchScore > 0 && (
+          <Tag tone="success">
+            {product.matchScore}% {t("match")}
+          </Tag>
+        )
       )}
     </Link>
   );

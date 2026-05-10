@@ -2,28 +2,41 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
-import { ChevronLeft, MoreVertical, Sparkles } from "lucide-react";
+import { ChevronLeft, MoreVertical } from "lucide-react";
 import { Card, Tag } from "@/components/ui";
 import {
-  CompatibilityTable,
-  IngredientCard,
+  IngredientsList,
   ProductActionBar,
-  VerdictCard,
+  ProductCompatibilitySection,
+  type IngredientsListItem,
 } from "@/components/product";
 import { findProductByBarcode } from "@/lib/mock";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
+import { getCurrentUser } from "@/lib/auth";
+import { getBeautyProfileByUserId } from "@/lib/db/repositories/beauty-profile";
+import {
+  inciToFact,
+  type IngredientFact,
+  type SkinProfileSummaryLike,
+} from "@/lib/compatibility";
 
 /**
  * /product/<id-or-barcode>
  *
- * Историческое имя сегмента — `[barcode]` (так было в Phase 5 demo). С Phase 6
- * сюда приходят реальные `Product.id` (cuid) из БД, поэтому handler сначала
- * ищет в БД по `id`, потом по `barcode`, и только в самом конце — fallback
- * на mock каталог по barcode.
+ * Phase 10.1:
+ *   - На сервере: загружаем продукт (DB или mock fallback) и опц. profile
+ *     текущего user'а. Готовим IngredientFact[]'ы (engine input).
+ *   - На клиенте: <ProductCompatibilitySection /> + <IngredientsList />
+ *     сами берут профиль (server-injected для user'а / demo store для guest)
+ *     и считают engine локально. Один UI для guest и user.
+ *   - matchScore прокидывается в <ProductActionBar /> только если профиль
+ *     известен на сервере (user). Для guest-mode score сохраняется в
+ *     demo-store через addScan() — UI score badge поверх engine result.
  *
- * TODO: переименовать каталог сегмента на `[id]` через git mv (физически
- * удалить эту папку нельзя из этого окружения).
+ * Не ломаем:
+ *   - mock fallback всё ещё работает (для legacy mock-каталога Phase 5).
+ *   - Action bar / scanner / favorites / history — без изменений.
  */
 
 interface Params {
@@ -64,6 +77,31 @@ async function findInDb(
   }
 }
 
+async function loadServerProfile(): Promise<{
+  mode: "user" | "guest";
+  serverProfile: SkinProfileSummaryLike | null;
+}> {
+  const user = await getCurrentUser();
+  if (!user) return { mode: "guest", serverProfile: null };
+  try {
+    const p = await getBeautyProfileByUserId(user.id);
+    if (!p) return { mode: "user", serverProfile: null };
+    return {
+      mode: "user",
+      serverProfile: {
+        skinType: p.skinType.toLowerCase(),
+        sensitivity: p.sensitivity.toLowerCase(),
+        concerns: p.concerns.map((c) => c.toLowerCase()),
+        avoidedList: p.avoidedList.map((a) => a.toLowerCase()),
+        goal: p.goal.toLowerCase(),
+      },
+    };
+  } catch (e) {
+    console.error("[product/page] profile load failed:", e);
+    return { mode: "guest", serverProfile: null };
+  }
+}
+
 export async function generateMetadata({
   params,
 }: {
@@ -88,16 +126,38 @@ export default async function ProductAnalysisPage({
 }) {
   const { barcode: idOrBarcode } = await params;
   const t = await getTranslations("product");
+  const locale = await getLocale();
 
-  // 1) DB по id, потом по barcode
+  const session = await loadServerProfile();
+
+  // 1) DB lookup
   const db = await findInDb(idOrBarcode);
   if (db) {
-    return <DbProductView product={db} />;
+    return (
+      <DbProductView
+        product={db}
+        locale={locale}
+        mode={session.mode}
+        serverProfile={session.serverProfile}
+        t={t}
+      />
+    );
   }
 
-  // 2) Demo / Phase 5 fallback
+  // 2) Mock fallback (Phase 5 каталог)
   const mock = findProductByBarcode(idOrBarcode);
   if (mock) {
+    const facts: IngredientFact[] = mock.ingredients.map((ing, i) =>
+      inciToFact(ing.inci, i + 1),
+    );
+    const items: IngredientsListItem[] = mock.ingredients.map((ing, i) => ({
+      id: ing.id,
+      inci: ing.inci,
+      position: i + 1,
+      displayName: ing.displayName,
+      description: ing.description,
+    }));
+
     return (
       <main className="relative mx-auto min-h-screen w-full max-w-[480px] bg-warm-white pb-32 animate-fade-in">
         <header className="sticky top-0 z-10 bg-gradient-to-br from-soft-beige to-warm-white px-6 py-6">
@@ -136,58 +196,34 @@ export default async function ProductAnalysisPage({
         </header>
 
         <div className="px-6 pt-6">
-          <VerdictCard
-            tone={mock.verdict}
-            title={mock.verdictTitle}
-            subtitle={mock.verdictSubtitle}
-            matchScore={mock.matchScore}
+          <ProductCompatibilitySection
+            mode={session.mode}
+            facts={facts}
+            serverProfile={session.serverProfile}
           />
         </div>
 
         <section className="px-6 mt-8">
           <h3 className="text-h3 text-graphite mb-3">{t("keyIngredients")}</h3>
-          <div className="space-y-2">
-            {mock.ingredients.map((ing) => (
-              <IngredientCard key={ing.id} ingredient={ing} />
-            ))}
-          </div>
+          <IngredientsList
+            mode={session.mode}
+            items={items}
+            facts={facts}
+            serverProfile={session.serverProfile}
+          />
         </section>
 
-        <section className="px-6 mt-8">
-          <h3 className="text-h3 text-graphite mb-3">{t("skinCompatibility")}</h3>
-          <CompatibilityTable rows={mock.compatibility} />
-        </section>
-
-        <section className="px-6 mt-8 mb-8">
-          <h3 className="text-h3 text-graphite mb-3">{t("aiExplanation")}</h3>
-          <Card
-            className="bg-gradient-to-br from-soft-lavender to-pure-white"
-            padding="default"
-          >
-            <div className="flex items-start gap-3">
-              <div
-                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-lavender-deep text-pure-white"
-                aria-hidden
-              >
-                <Sparkles className="h-4 w-4" strokeWidth={2} />
-              </div>
-              <div className="space-y-2">
-                {mock.aiExplanation.map((p, i) => (
-                  <p
-                    key={i}
-                    className={`text-body-sm ${
-                      i === 0 ? "text-graphite" : "text-muted-graphite"
-                    }`}
-                  >
-                    {p}
-                  </p>
-                ))}
-              </div>
-            </div>
-          </Card>
-        </section>
-
-        <ProductActionBar product={{ id: mock.id }} />
+        <ProductActionBar
+          product={{ id: mock.id }}
+          scoringContext={{
+            mode: session.mode,
+            inciList: mock.ingredients.map((ing, i) => ({
+              inci: ing.inci,
+              position: i + 1,
+            })),
+            serverProfile: session.serverProfile,
+          }}
+        />
       </main>
     );
   }
@@ -196,25 +232,43 @@ export default async function ProductAnalysisPage({
   notFound();
 }
 
-/* ───────── DB view ─────────
- *
- * Минимальная подача: header (brand/name/barcode/category/imageUrl) +
- * список ингредиентов из ProductIngredient. Verdict/AI/compatibility
- * не показываем — engine для DB-продуктов появится в Phase 6.2.
- */
+/* ───────── DB view ───────── */
+
 async function DbProductView({
   product,
+  locale,
+  mode,
+  serverProfile,
+  t,
 }: {
   product: DbProductWithIngredients;
+  locale: string;
+  mode: "user" | "guest";
+  serverProfile: SkinProfileSummaryLike | null;
+  t: Awaited<ReturnType<typeof getTranslations<"product">>>;
 }) {
-  const t = await getTranslations("product");
-  const locale = await getLocale();
   const isEn = locale === "en";
 
   const categoryLabel =
     product.category && product.category !== "OTHER"
       ? product.category.replace(/_/g, " ").toLowerCase()
       : null;
+
+  const facts: IngredientFact[] = product.ingredients.map((l) =>
+    inciToFact(l.ingredient.inci, l.position),
+  );
+
+  const items: IngredientsListItem[] = product.ingredients.map((l) => ({
+    id: `${product.id}_${l.ingredientId}`,
+    inci: l.ingredient.inci,
+    position: l.position,
+    displayName: isEn
+      ? l.ingredient.displayNameEn
+      : l.ingredient.displayNameRu,
+    description:
+      (isEn ? l.ingredient.descriptionEn : l.ingredient.descriptionRu) ??
+      undefined,
+  }));
 
   return (
     <main className="relative mx-auto min-h-screen w-full max-w-[480px] bg-warm-white pb-32 animate-fade-in">
@@ -267,6 +321,14 @@ async function DbProductView({
         </div>
       </header>
 
+      <div className="px-6 pt-6">
+        <ProductCompatibilitySection
+          mode={mode}
+          facts={facts}
+          serverProfile={serverProfile}
+        />
+      </div>
+
       <section className="px-6 mt-8 mb-8">
         <h3 className="text-h3 text-graphite mb-3">{t("keyIngredients")}</h3>
 
@@ -275,38 +337,26 @@ async function DbProductView({
             <p className="text-body-sm text-muted-graphite">—</p>
           </Card>
         ) : (
-          <ul className="space-y-2">
-            {product.ingredients.map(({ ingredient, position }) => {
-              const display = isEn
-                ? ingredient.displayNameEn
-                : ingredient.displayNameRu;
-              const description = isEn
-                ? ingredient.descriptionEn
-                : ingredient.descriptionRu;
-              return (
-                <li
-                  key={ingredient.id}
-                  className="rounded-md bg-pure-white p-4 shadow-soft-sm"
-                >
-                  <div className="flex items-baseline justify-between gap-3">
-                    <span className="text-body text-graphite">{display}</span>
-                    <span className="text-caption text-light-graphite">
-                      #{position}
-                    </span>
-                  </div>
-                  {description && (
-                    <p className="text-body-sm text-muted-graphite mt-1">
-                      {description}
-                    </p>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+          <IngredientsList
+            mode={mode}
+            items={items}
+            facts={facts}
+            serverProfile={serverProfile}
+          />
         )}
       </section>
 
-      <ProductActionBar product={{ id: product.id }} />
+      <ProductActionBar
+        product={{ id: product.id }}
+        scoringContext={{
+          mode,
+          inciList: product.ingredients.map((l) => ({
+            inci: l.ingredient.inci,
+            position: l.position,
+          })),
+          serverProfile,
+        }}
+      />
     </main>
   );
 }

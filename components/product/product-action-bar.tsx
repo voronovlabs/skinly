@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useTransition } from "react";
+import { useEffect, useMemo, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -10,6 +10,14 @@ import { cn } from "@/lib/cn";
 import { useDemoStore } from "@/lib/demo-store";
 import { toggleFavoriteAction } from "@/app/actions/favorites";
 import { recordScanAction } from "@/app/actions/scans";
+import {
+  evaluateCompatibility,
+  demoProfileToEngine,
+  summaryProfileToEngine,
+  inciToFact,
+  type IngredientFact,
+  type SkinProfileSummaryLike,
+} from "@/lib/compatibility";
 
 /**
  * ProductActionBar — нижняя зафиксированная панель на /product/[id].
@@ -28,13 +36,28 @@ import { recordScanAction } from "@/app/actions/scans";
  *   - После toggle делаем `router.refresh()`, чтобы серверные страницы
  *     (/favorites, /history, /dashboard) подтянули свежее состояние,
  *     если пользователь зашёл по ним повторно.
+ *
+ * Phase 10.1 (compatibility engine):
+ *   - Если переданы `inciList` + `mode`, на mount считаем engine score и
+ *     прокидываем его в `recordScanAction`. ScanHistory получает реальный
+ *     match-snapshot вместо `0`.
+ *   - Без props (или без профиля) — score=0, поведение как раньше.
  */
 
 export interface ProductActionBarProps {
   product: { id: string };
+  /** Контекст для engine — если передан, считаем match-score при записи скана. */
+  scoringContext?: {
+    mode: "user" | "guest";
+    inciList: ReadonlyArray<{ inci: string; position?: number }>;
+    serverProfile?: SkinProfileSummaryLike | null;
+  };
 }
 
-export function ProductActionBar({ product }: ProductActionBarProps) {
+export function ProductActionBar({
+  product,
+  scoringContext,
+}: ProductActionBarProps) {
   const t = useTranslations("product");
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -46,14 +69,35 @@ export function ProductActionBar({ product }: ProductActionBarProps) {
     isFavorite,
     isInCompare,
     hydrated,
+    state,
   } = useDemoStore();
 
-  // record on view: demo store (instant) + DB (для user'а)
+  // Build profile object — для guest из demo store, для user из props.
+  const profile = useMemo(() => {
+    if (!scoringContext) return null;
+    if (scoringContext.mode === "user")
+      return summaryProfileToEngine(scoringContext.serverProfile ?? null);
+    return demoProfileToEngine(state.skinProfile);
+  }, [scoringContext, state.skinProfile]);
+
+  const facts = useMemo<IngredientFact[]>(() => {
+    if (!scoringContext) return [];
+    return scoringContext.inciList.map((x, i) =>
+      inciToFact(x.inci, x.position ?? i + 1),
+    );
+  }, [scoringContext]);
+
+  // record on view: demo store (instant) + DB (для user'а) + engine score
   useEffect(() => {
     if (!hydrated) return;
     addScan(product.id);
+    let score = 0;
+    if (profile && facts.length > 0) {
+      const r = evaluateCompatibility(profile, facts);
+      score = r.score;
+    }
     startTransition(async () => {
-      await recordScanAction(product.id, 0);
+      await recordScanAction(product.id, score);
     });
     // intentionally one-shot per mount
     // eslint-disable-next-line react-hooks/exhaustive-deps

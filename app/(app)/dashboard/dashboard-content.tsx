@@ -96,7 +96,20 @@ export function DashboardContent({
       />
       <div className="flex gap-4 overflow-x-auto px-6 pb-1 no-scrollbar">
         {recommendations.map((p) => (
-          <ProductCard key={p.id} product={p} layout="fixed" />
+          <ProductCard
+            key={p.id}
+            product={p}
+            layout="fixed"
+            // Phase 10.1: live-score из движка вместо mock matchScore.
+            liveScoring={{
+              mode,
+              inciList: p.ingredients.map((ing, i) => ({
+                inci: ing.inci,
+                position: i + 1,
+              })),
+              serverProfile: serverProfile ?? null,
+            }}
+          />
         ))}
       </div>
 

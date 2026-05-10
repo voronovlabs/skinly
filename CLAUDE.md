@@ -49,10 +49,200 @@ Compose).
 | 7.1 — iOS scanner | @zxing/browser lazy fallback для WebKit | ✅ |
 | 8 — Production deploy | Caddy + Docker Compose, tools service, миграции через `migrate deploy` | ✅ |
 | 9 — Server persistence | Auth + Profile + Favorites + History в Postgres, dual-mode с guest fallback | ✅ |
-| **11 — Auth/Onboarding UX + Guest→User migration (текущая)** | 3-tier welcome CTA, account gate, soft migration localStorage → Postgres при register/login | ✅ |
-| 10 — Compatibility engine | Score + verdict + AI explanation (deterministic + Anthropic) | ⏳ |
+| 11 — Auth/Onboarding UX + Guest→User migration | 3-tier welcome CTA, account gate, soft migration localStorage → Postgres при register/login | ✅ |
+| **10.1 — Compatibility engine v1 (текущая)** | Deterministic rules + INCI knowledge base, реальный score / verdict / per-ingredient findings, заменил mock | ✅ |
+| 10.2 — AI explanation | Anthropic-генерируемые объяснения поверх engine result | ⏳ |
+| 10.3 — ML scoring | Калибровка score через telemetry / ratings | ⏳ |
+| 10.4 — Ingredient interaction graph | Нерекомендованные комбинации (retinol + AHA, vit C + niacinamide и т.п.) | ⏳ |
 | 12 — PWA polish | Manifest, icons, offline cache | ⏳ |
 | 13 — Tests + CI | Vitest unit + Playwright e2e + GitHub Actions | ⏳ |
+
+## Текущая фаза (10.1) — Compatibility engine v1
+
+Production-grade deterministic scoring engine для product analysis. Без AI,
+без LLM, без БД-зависимостей — pure-функция, server- и client-safe.
+
+### Архитектура
+
+```
+lib/compatibility/
+├── types.ts          public types: Profile, Fact, Result, Verdict, RuleHit, KbEntry
+├── ingredients.ts    INCI knowledge base + lookup (нормализация, aliases, partial)
+├── rules.ts          декларативный список правил (avoidedList, sensitivity,
+│                     concerns, skinType, goal). Каждое правило → RuleHit[].
+├── score.ts          public entry: evaluateCompatibility(profile, facts)
+├── explain.ts        engine result → CompatibilityRow[] + IngredientFinding[]
+├── adapters.ts       DB BeautyProfile / DemoSkinProfile / Mock → engine input
+└── index.ts          barrel
+```
+
+### Engine input
+
+```ts
+interface CompatibilityProfile {
+  skinType: SkinType | null;       // "dry" | "oily" | "combination" | "normal"
+  sensitivity: SensitivityLevel | null;
+  concerns: SkinConcern[];
+  avoidedList: AvoidedIngredient[];
+  goal: SkincareGoal | null;
+}
+
+interface IngredientFact {
+  inci: string;
+  position: number;
+  kbId: string | null;             // null = неизвестный ингредиент
+  benefitsFor: SkinConcern[];
+  cautionsFor: SkinConcern[];
+  flagsAvoided: AvoidedIngredient[];
+  tags: IngredientTag[];           // humectant, fragrance, exfoliant_bha, ...
+  baseSafety: "beneficial" | "neutral" | "caution" | "danger";
+}
+```
+
+### Engine output
+
+```ts
+interface CompatibilityResult {
+  score: number;                   // 0..100; 0 = engine не запускался
+  verdict: "excellent" | "good" | "mixed" | "risky";
+  reasons: RuleHit[];              // топовые причины (для VerdictCard)
+  positives: RuleHit[];
+  warnings: RuleHit[];
+  matchedConcerns: SkinConcern[];
+  triggeredAvoided: AvoidedIngredient[];
+  rows: CompatibilityRowComputed[];      // готовые строки таблицы
+  ingredientFindings: IngredientFinding[]; // per-ingredient safety с учётом профиля
+  lowConfidence: boolean;          // < 30% ингредиентов распознано → score «приблизителен»
+}
+```
+
+### Scoring formula
+
+```
+baseline = 75
+sumPositives — сумма weight'ов «позитивных» hits
+sumWarnings   — сумма weight'ов «предупреждающих» hits
+
+dampened = sumPositives ≤ 30 ? sumPositives
+                              : 30 + (sumPositives − 30) * 0.5
+                              # diminishing returns после +30
+
+raw = baseline + dampened + sumWarnings
+raw = clamp(raw, 25, 100)
+
+# жёсткий потолок при срабатывании avoidedList
+if any warning.key === "avoidedFlag":
+  raw = min(raw, 60)
+
+# защита от overconfidence на неизвестном составе
+if recognitionRatio < 0.3:
+  raw = round(raw * 0.5 + 75 * 0.5)
+
+score = round(raw)
+
+verdict =
+   score >= 88 → "excellent"
+   score >= 72 → "good"
+   score >= 50 → "mixed"
+   else        → "risky"
+
+# avoidedList триггер сдвигает verdict на mixed, если score высокий
+```
+
+### Правила (`rules.ts`)
+
+| Rule | Когда срабатывает | Эффект |
+|------|-------------------|--------|
+| `avoided_list` | ingredient.flagsAvoided ∩ profile.avoidedList | warning, weight −25 (hard) |
+| `sensitivity` | sens=high/reactive + fragrance/essential_oil/alcohol | warning, −12/−18 |
+| `strong_actives_for_sensitive` | sens=high/reactive + retinoid/AHA/BHA | warning, −6/−10 |
+| `concern_match` | benefitsFor ∩ profile.concerns | positive, +6..+12 (active=сильнее) |
+| `concern_match` (cautions) | cautionsFor ∩ profile.concerns | warning, −10 |
+| `skin_dry` | skinType=dry + humectant/barrier/occlusive | positive, +5; alcohol_drying −8 |
+| `skin_oily` | skinType=oily + heavy_oil/comedogenic | warning, −10; light humectant +4 |
+| `skin_combination` | skinType=combination | comedogenic −6; humectant/barrier +3 |
+| `skin_normal` | skinType=normal | barrier/antioxidant +2 |
+| `goal_alignment` | profile.goal ∩ ingredient tags/benefits | positive, +4 |
+
+Расширение rules: новый объект в `RULES`. Поведение остальных правил не меняется.
+
+### Knowledge base (`ingredients.ts`)
+
+Около 35 ключевых ингредиентов: humectants, ceramides, niacinamide,
+salicylic/glycolic/lactic/azelaic, retinol, vitamin C, zinc PCA, snail
+mucin, centella, fragrance markers (parfum/linalool/limonene), alcohols
+(SD/IPA), SLS/SLES, parabens, essential oils, comedogenic oils, UV filters.
+
+Lookup устойчив к:
+- регистру / пробелам / дефисам / слешам
+- процентным суффиксам («Niacinamide 4%»)
+- торговым знакам (™ ® ©)
+- скобкам (берём текст до `(`)
+- partial substring match
+
+Расширение KB: новая запись в `KB`-массиве с `id` / `inci` / `aliases` /
+`benefitsFor` / `cautionsFor` / `flagsAvoided` / `tags` / `baseSafety`.
+
+### Профиль: lowercase id
+
+Engine ожидает lowercase id'шники (`"dry"`, `"acne"`, ...). DB-енумы
+(`DRY`, `ACNE`) приводятся через адаптер `dbBeautyProfileToEngine()`,
+demo store уже хранит lowercase, mock-каталог тоже. Один engine API
+работает и для guest, и для user.
+
+### Wiring
+
+| Поверхность | Как подключено |
+|---|---|
+| `/product/[id-or-barcode]` (DB) | server отдаёт INCI+positions, `<ProductCompatibilitySection />` + `<IngredientsList />` считают результат на клиенте |
+| `/product/[id-or-barcode]` (mock fallback) | то же — engine запускается на mock-составе |
+| Dashboard recommendations | `<ProductCard liveScoring={...}>` → `<LiveMatchBadge />` |
+| Product action bar (запись скана) | `<ProductActionBar scoringContext={...}>` считает score и кладёт в `recordScanAction(productId, score)` — ScanHistory.matchScore = реальный engine snapshot |
+| History (recent / list) | читает `ScanHistory.matchScore` (snapshot из engine) |
+| Favorites | бейдж не показываем без ингредиентов (карточки лёгкие); в Phase 10.2 расширим |
+
+### Guest mode
+
+Engine работает идентично. Профиль приходит из demo store, ингредиенты —
+из mock-каталога. ScanHistory не пишется (для guest action no-op), но
+demo store содержит scans без score-snapshot — в Phase 10.2 добавим
+сохранение `matchScore` в demo store.
+
+### Performance
+
+- O(N_rules × N_facts) на один evaluateCompatibility, ≈ 9 правил × ≤ 30
+  ингредиентов = ≤ 270 операций. Pure-функция, без БД, без I/O.
+- На сервере `evaluateCompatibility` не вызывается напрямую — клиентские
+  компоненты считают локально (один вызов на маунт + memo).
+- KB-lookup за O(1) через pre-built Map; partial-fallback за O(K), где K —
+  размер KB (≈ 35).
+
+### Future-ready
+
+- Phase 10.2 (AI explanation): добавит `aiExplanation?: string[]` в
+  `CompatibilityResult`. Engine API не меняется.
+- Phase 10.3 (ML scoring): подменит `score` после правил, оставит rest.
+- Phase 10.4 (interaction graph): новые правила в `rules.ts` без изменений
+  KB или engine API.
+
+### Что НЕ менялось
+
+- Prisma schema: `Ingredient.flagsAvoided` / `benefitsFor` / `cautionsFor`
+  всё ещё пусты в БД (нормализатор их не заполняет). Engine читает
+  knowledge из in-code KB по `Ingredient.inci` — это и есть source of truth.
+- Auth / session / middleware / scanner / onboarding / Phase 11 flow.
+- DB writes: формат ScanHistory тот же, просто `matchScore` теперь не 0.
+
+### Known limitations
+
+- KB покрывает популярные ингредиенты, но далеко не весь каталог. На
+  продуктах с большим количеством unknown'ов сработает `lowConfidence`,
+  и engine приближает score к baseline 75.
+- Engine не моделирует concentration/order: 0.5% и 5% салициловой пока
+  оцениваются одинаково. `ProductIngredient.concentration` есть в schema —
+  Phase 10.3 учтёт.
+- Engine не моделирует pH, photo-stability, формулу как систему.
+- Без AI-объяснений: subtitle и breakdown полностью deterministic.
 
 ## Текущая фаза (11) — Auth/Onboarding UX + Guest → User migration
 
@@ -229,6 +419,14 @@ app/
 lib/
 ├── auth/            session (jose JWT), server (cookies), password (bcrypt),
 │                    current-user, forms (типы для useActionState)
+├── compatibility/   Phase 10.1 — deterministic engine
+│   ├── types.ts             Profile, Fact, Result, Verdict, RuleHit, KbEntry
+│   ├── ingredients.ts       INCI knowledge base + lookup
+│   ├── rules.ts             declarative rules (avoidedList, sensitivity, …)
+│   ├── score.ts             evaluateCompatibility() — public entry
+│   ├── explain.ts           result → CompatibilityRow[] + IngredientFinding[]
+│   ├── adapters.ts          DB / demo / mock → engine input
+│   └── index.ts             barrel
 ├── db/
 │   ├── prisma.ts
 │   ├── display/                DB → view mappers
@@ -246,7 +444,9 @@ components/
 │                    StartOnboardingButton, GuestMigrator (Phase 11)
 ├── dashboard/       ScanCard, SectionHeader
 ├── product/         ProductCard, HistoryItem, IngredientCard, VerdictCard,
-│                    CompatibilityTable, ProductActionBar
+│                    CompatibilityTable, ProductActionBar,
+│                    ProductCompatibilitySection, IngredientsList,
+│                    LiveMatchBadge (Phase 10.1)
 ├── profile/         ProfileHeader, SkinProfileCard, StatsRow,
 │                    PreferencesSection, ResetDemoButton, StatCard
 ├── onboarding/      OnboardingWizard

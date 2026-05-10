@@ -15,3 +15,17 @@ export type { CompatibilityTableProps } from "./compatibility-table";
 
 export { ProductActionBar } from "./product-action-bar";
 export type { ProductActionBarProps } from "./product-action-bar";
+
+export {
+  ProductCompatibilitySection,
+  safetyToBorderClass,
+  safetyToDotClass,
+  safetyToTagTone,
+} from "./compatibility-section";
+export type { ProductCompatibilitySectionProps } from "./compatibility-section";
+
+export { IngredientsList } from "./ingredients-list";
+export type { IngredientsListItem, IngredientsListProps } from "./ingredients-list";
+
+export { LiveMatchBadge } from "./live-match-badge";
+export type { LiveMatchBadgeProps } from "./live-match-badge";

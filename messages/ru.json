@@ -308,5 +308,91 @@
       "essential_oils": "Эфирные масла"
     },
     "phaseNote": "Phase 3 · auth подключится в Phase 4"
+  },
+  "compatibility": {
+    "loading": "Считаем совместимость…",
+    "noProfile": "Чтобы оценить продукт, нужен профиль кожи.",
+    "noProfileCta": "Пройти анкету →",
+    "lowConfidence": "Состав распознан частично — оценка приблизительная.",
+    "breakdown": "Почему такая оценка",
+    "positivesTitle": "Что подходит",
+    "warningsTitle": "На что обратить внимание",
+    "verdicts": {
+      "excellent": "Идеально подходит",
+      "good": "Подходит вам",
+      "mixed": "Смешанно — с осторожностью",
+      "risky": "Скорее всего, не подходит"
+    },
+    "subtitles": {
+      "excellent": "Полностью соответствует вашему профилю кожи.",
+      "good": "В целом совместим с вашим профилем.",
+      "mixed": "Есть и плюсы, и спорные моменты — вводите постепенно.",
+      "risky": "Состав конфликтует с вашим профилем."
+    },
+    "tags": {
+      "beneficial": "Полезен",
+      "neutral": "Нейтрален",
+      "caution": "С осторожностью",
+      "danger": "Избегайте"
+    },
+    "rows": {
+      "skinType": "Ваш тип кожи ({skinType})",
+      "sensitivity": "Чувствительность",
+      "concern": "Проблема · {concern}",
+      "avoided": "Избегаете · {avoided}"
+    },
+    "captions": {
+      "compatible": "Совместимо",
+      "supports": "Поддерживает",
+      "treats": "Лечит",
+      "patchTest": "Тест на аллергию",
+      "warning": "С осторожностью",
+      "incompatible": "Не подходит",
+      "neutral": "Нейтрально"
+    },
+    "skinTypes": {
+      "dry": "сухая",
+      "oily": "жирная",
+      "combination": "комбинированная",
+      "normal": "нормальная"
+    },
+    "concerns": {
+      "acne": "акне",
+      "aging": "старение",
+      "pigmentation": "пигментация",
+      "redness": "покраснения",
+      "pores": "поры",
+      "blackheads": "чёрные точки"
+    },
+    "avoided": {
+      "fragrance": "отдушки",
+      "alcohol": "спирт",
+      "sulfates": "сульфаты",
+      "parabens": "парабены",
+      "essential_oils": "эфирные масла"
+    },
+    "goals": {
+      "clear_skin": "чистая кожа",
+      "anti_aging": "антивозрастной уход",
+      "hydration": "увлажнение",
+      "even_tone": "ровный тон",
+      "minimal_routine": "минимальная рутина"
+    },
+    "reasons": {
+      "avoidedFlag": "{ingredient} в вашем списке избегаемых ({avoided})",
+      "sensitiveTrigger": "{ingredient} может раздражать чувствительную кожу",
+      "activeForSensitive": "{ingredient} — сильный актив, нужен patch-test",
+      "helpsConcern": "{ingredient} помогает при {concern}",
+      "cautionForConcern": "{ingredient} может усугубить {concern}",
+      "dryFriendly": "{ingredient} увлажняет и укрепляет барьер сухой кожи",
+      "dryStripping": "{ingredient} может пересушивать сухую кожу",
+      "oilyHeavy": "{ingredient} тяжеловат для жирной кожи",
+      "oilyLightHydration": "{ingredient} — лёгкое увлажнение, подходит жирной коже",
+      "combinationComedogenic": "{ingredient} может забивать поры в Т-зоне",
+      "combinationBalanced": "{ingredient} балансирует комбинированную кожу",
+      "normalMaintenance": "{ingredient} поддерживает здоровый барьер",
+      "goalAlignment": "{ingredient} работает на вашу цель: {goal}",
+      "comedogenicForAcne": "{ingredient} может усиливать высыпания"
+    }
   }
 }
