@@ -4,9 +4,14 @@ import Link from "next/link";
 import { useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { Camera } from "lucide-react";
-import { Card, ProgressBar, Tag } from "@/components/ui";
+import { Card, ProgressBar } from "@/components/ui";
 import { ScreenContainer } from "@/components/layout";
-import { ScanCard, SectionHeader } from "@/components/dashboard";
+import {
+  ContextualTip,
+  DashboardGreeting,
+  ScanCard,
+  SectionHeader,
+} from "@/components/dashboard";
 import { ProductCard, HistoryItem } from "@/components/product";
 import { demoScansToScanRecords, useDemoStore } from "@/lib/demo-store";
 import {
@@ -67,22 +72,20 @@ export function DashboardContent({
   return (
     <ScreenContainer withBottomNav>
       <header className="px-6 pt-6 pb-2 bg-gradient-to-b from-warm-white to-transparent">
-        <div className="mb-2 flex items-center justify-between">
-          <div>
-            <p className="text-caption text-muted-graphite">{t("greeting")}</p>
-            <h1 className="text-h1 text-graphite mt-1">
-              {greetingName ?? t("yourOverview")}
-            </h1>
-          </div>
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <DashboardGreeting
+            name={greetingName ?? null}
+            fallbackHeadline={t("yourOverview")}
+          />
           <Link
             href="/profile"
             aria-label={t("openProfile")}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-soft-beige text-xl text-graphite"
+            className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-soft-beige text-xl text-graphite"
           >
             {MOCK_USER.avatarEmoji}
           </Link>
         </div>
-        <Tag tone="premium">💡 {t("weatherTip")}</Tag>
+        <ContextualTip mode={mode} serverProfile={serverProfile ?? null} />
       </header>
 
       <div className="px-6 mt-4 mb-6">

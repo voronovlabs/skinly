@@ -50,12 +50,142 @@ Compose).
 | 8 — Production deploy | Caddy + Docker Compose, tools service, миграции через `migrate deploy` | ✅ |
 | 9 — Server persistence | Auth + Profile + Favorites + History в Postgres, dual-mode с guest fallback | ✅ |
 | 11 — Auth/Onboarding UX + Guest→User migration | 3-tier welcome CTA, account gate, soft migration localStorage → Postgres при register/login | ✅ |
-| **10.1 — Compatibility engine v1 (текущая)** | Deterministic rules + INCI knowledge base, реальный score / verdict / per-ingredient findings, заменил mock | ✅ |
+| 10.1 — Compatibility engine v1 | Deterministic rules + INCI knowledge base, реальный score / verdict / per-ingredient findings, заменил mock | ✅ |
+| **12 — Contextual layer & copy polish (текущая)** | Greeting по локальному времени, Open-Meteo weather, declarative tip engine, full copy audit | ✅ |
 | 10.2 — AI explanation | Anthropic-генерируемые объяснения поверх engine result | ⏳ |
 | 10.3 — ML scoring | Калибровка score через telemetry / ratings | ⏳ |
 | 10.4 — Ingredient interaction graph | Нерекомендованные комбинации (retinol + AHA, vit C + niacinamide и т.п.) | ⏳ |
-| 12 — PWA polish | Manifest, icons, offline cache | ⏳ |
-| 13 — Tests + CI | Vitest unit + Playwright e2e + GitHub Actions | ⏳ |
+| 13 — PWA polish | Manifest, icons, offline cache | ⏳ |
+| 14 — Tests + CI | Vitest unit + Playwright e2e + GitHub Actions | ⏳ |
+
+## Текущая фаза (12) — Contextual layer & copy polish
+
+Premium UX-слой для дашборда. Living greeting + контекстные recommendations
+из time-of-day, погоды и профиля кожи. Никаких LLM, никаких тяжёлых SDK.
+
+### Архитектура
+
+```
+lib/contextual/
+├── types.ts            DayPart, WeatherSnapshot, RecommendationDef, ContextualProfile
+├── greeting.ts         greetingPart(now?) → "morning" | "day" | "evening" | "night"
+├── weather.ts          Open-Meteo client (без SDK), geolocation, sessionStorage cache
+├── recommendations.ts  declarative rule list (UV, погода, тип кожи, время)
+└── index.ts            barrel
+
+components/dashboard/
+├── greeting.tsx        SSR-safe greeting (нейтральный → time-based в useEffect)
+└── contextual-tip.tsx  geo + weather pipeline + pickRecommendation()
+```
+
+### Greeting
+
+`greetingPart(now)` возвращает один из 4 day-part'ов по часу:
+- 5–10 → `morning`
+- 11–16 → `day`
+- 17–21 → `evening`
+- 22–4 → `night`
+
+SSR рендерит `day` (нейтрально для всех таймзон). Client пересчитывает
+`useEffect`. Без визуальных «прыжков» — обновляется только текст.
+i18n keys: `dashboard.greetings.{morning|day|evening|night}`.
+
+### Weather pipeline
+
+Источник — [Open-Meteo](https://open-meteo.com): free, no key, маленький JSON.
+
+`fetch('https://api.open-meteo.com/v1/forecast?...&current=...')`:
+- temperature_2m
+- relative_humidity_2m
+- uv_index
+- wind_speed_10m (в м/с)
+- weather_code (WMO)
+
+Pipeline в `<ContextualTip>`:
+1. На mount — читаем `sessionStorage["skinly:weather:v1"]` (TTL 60 мин).
+2. Запрашиваем `navigator.geolocation.getCurrentPosition`:
+   - timeout 6с, maxAge 10 мин, не high-accuracy
+   - safety-timer на iOS WebKit
+3. На coords → `fetch` с AbortController (5с timeout), `cache: no-store`.
+4. На любом отказе / ошибке — остаёмся на time/profile-based tip.
+
+Никаких ключей API, никаких SDK, ничего серверного.
+
+### Recommendation engine (`recommendations.ts`)
+
+Декларативный список правил с приоритетом. `pickRecommendation(ctx)` идёт по
+порядку и возвращает первое сработавшее. Всегда возвращает хотя бы welcome.
+
+| Priority | Rule | Условие | Tip |
+|---|---|---|---|
+| 100 | `very_high_uv` | UV ≥ 7 и day-time | "UV сегодня сильный (индекс N), обновляйте SPF каждые 2 часа" |
+| 95 | `high_uv` | UV ≥ 4 и day-time | "UV N — держите SPF под рукой" |
+| 80 | `hot_humid` | T ≥ 27 + humidity ≥ 60 | "Тепло и влажно — лёгкие текстуры" |
+| 75 | `cold_dry` | T ≤ 5 + humidity ≤ 40 | "Холодно и сухо — восстановление барьера" |
+| 70 | `dry_air_sensitive` | humidity ≤ 35 + (dry skin или sensitive) | "Воздух сухой — плотнее увлажнитель" |
+| 65 | `windy` | wind ≥ 8 м/с | "Ветер усиливает сухость и реактивность" |
+| 60 | `snowy` | WMO snow | "Плотный увлажнитель + SPF" |
+| 55 | `rainy` | WMO rain/drizzle | "Мягкие текстуры заходят лучше" |
+| 50 | `evening_repair` | dayPart = evening / night | "Вечер — про восстановление" |
+| 45 | `morning_freshness` | dayPart = morning | "Мягкое начало дня: увлажнение, антиоксиданты, SPF" |
+| 40 | `redness_focus` | concerns.includes("redness") | "В дни покраснений важны успокаивающие компоненты" |
+| 35 | `acne_focus` | concerns.includes("acne") | "Регулярность важнее интенсивности" |
+| 20 | `daytime_spf` | day + (clear/cloudy) или нет погоды | "Сначала SPF" |
+| 0 | `welcome` | always | "SPF — лучшее, что можно сделать для кожи" |
+
+Расширение rules — новый объект в `RULES`. KB-нагрузки нет, всё declarative.
+
+### Copy philosophy
+
+Тон — calm / premium / mobile-native. Никакого «должны», никаких медицинских
+оборотов. Тип Apple Health / Headspace / Oura. Изменены:
+- `dashboard.greeting` (статичный) → `dashboard.greetings.*` (time-based)
+- `dashboard.weatherTip` (захардкоженная фраза) → `dashboard.tips.*` (14 ключей)
+- `dashboard.yourOverview`, `recommendations`, `noScans*`, `skinProfileEmpty*` — переписаны на calm-tone
+
+Все строки прошли через i18n; нет hardcoded JSX-текстов.
+
+### SSR-safety
+
+- Greeting: SSR рендерит `day` → client делает `useEffect` swap. Нет
+  hydration mismatch (тег и обёртка идентичны).
+- Контекстный tip: SSR рендерит welcome → client апгрейдит до time-based,
+  потом до weather-based. Каждое обновление — внутри одного и того же
+  premium-peach контейнера, без сдвигов layout'а.
+
+### Performance
+
+- Open-Meteo: 1 fetch per session (cache 60 мин). Размер ответа ≈ 200 B.
+- Geolocation: 1 запрос на всю сессию (флаг `askedGeo`).
+- `pickRecommendation`: O(N_rules) ≈ 14 итераций. Pure-функция.
+
+### Graceful fallback (приоритеты)
+
+1. Если geo разрешён + weather загружен → tip от weather rules.
+2. Если geo отказан / network упал → tip от time-of-day или profile.
+3. Если нет ни того, ни другого → welcome (`SPF — лучшее, что можно сделать
+   для кожи`).
+
+UI никогда не висит и никогда не кричит про «нет доступа к геолокации».
+
+### Что НЕ менялось
+
+- Scanner, auth, onboarding, account gate, compatibility engine — без изменений.
+- Demo store, persistence, dashboard data-loading — без изменений.
+- Mobile layout: max-w-[480px], spacing prinсipy — без изменений.
+- Prisma schema — нет миграций.
+- i18n структура: добавлены keys внутри `dashboard.*`, остальные неймспейсы не тронуты.
+
+### Known limitations
+
+- Open-Meteo точка `current` иногда не возвращает `uv_index` ночью —
+  правила это учитывают (`uvIndex == null` → skip UV rules).
+- Если у браузера/устройства нет geolocation (старые WebView / iframes) —
+  tip остаётся time/profile-based; визуально это не отличается от стандарта.
+- Один контекстный tip на экран. Phase 13+ можем добавить «scroll-карусель».
+- Greeting обновляется только при mount'е. Если страница висит часами,
+  можно переключиться с «утра» на «день» — не критично, добавим
+  setInterval в будущем при необходимости.
 
 ## Текущая фаза (10.1) — Compatibility engine v1
 
@@ -427,6 +557,12 @@ lib/
 │   ├── explain.ts           result → CompatibilityRow[] + IngredientFinding[]
 │   ├── adapters.ts          DB / demo / mock → engine input
 │   └── index.ts             barrel
+├── contextual/      Phase 12 — greeting + weather + tips
+│   ├── types.ts             DayPart, WeatherSnapshot, RecommendationDef
+│   ├── greeting.ts          greetingPart(now?) — time-of-day helper
+│   ├── weather.ts           Open-Meteo client + geolocation + sessionStorage cache
+│   ├── recommendations.ts   declarative tip rules
+│   └── index.ts             barrel
 ├── db/
 │   ├── prisma.ts
 │   ├── display/                DB → view mappers
@@ -442,7 +578,8 @@ components/
 ├── layout/          ScreenContainer, BottomNav
 ├── auth/            LoginForm, RegisterForm, GuestButton, LogoutButton,
 │                    StartOnboardingButton, GuestMigrator (Phase 11)
-├── dashboard/       ScanCard, SectionHeader
+├── dashboard/       ScanCard, SectionHeader, DashboardGreeting,
+│                    ContextualTip (Phase 12)
 ├── product/         ProductCard, HistoryItem, IngredientCard, VerdictCard,
 │                    CompatibilityTable, ProductActionBar,
 │                    ProductCompatibilitySection, IngredientsList,
