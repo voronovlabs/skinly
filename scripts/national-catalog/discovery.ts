@@ -322,6 +322,16 @@ interface DiscoveryOptions {
   debug?: boolean;
   /** Игнорировать allowlist категорий, акцептить вообще всё (отладочный fallback). */
   unsafeAcceptAll?: boolean;
+  /**
+   * Phase 13: стартовый path для BFS. Если не задан — используется
+   * `ROOT_CATEGORY_PATH` (`/kosmetika-i-parfyumeriya/`).
+   *
+   * Сам startPath НЕ обязан совпадать с `COSMETIC_CATEGORY_PREFIXES` —
+   * мы его в любом случае посетим. А вот его подкатегории фильтруются
+   * матчингом `matchesCosmeticPrefix`. Чтобы scope'ить новый раздел —
+   * добавьте его в `COSMETIC_CATEGORY_PREFIXES`.
+   */
+  startPath?: string;
 }
 
 interface DiscoveryStats {
@@ -334,7 +344,9 @@ interface DiscoveryStats {
 export async function discoverProducts(
   opts: DiscoveryOptions,
 ): Promise<{ urls: string[]; stats: DiscoveryStats }> {
-  const queue: string[] = [ROOT_CATEGORY_PATH];
+  const startPath = opts.startPath ?? ROOT_CATEGORY_PATH;
+  opts.log(`[discovery] BFS startPath=${startPath}`);
+  const queue: string[] = [startPath];
   const visited = new Set<string>();
   const products = new Set<string>();
   const categories = new Set<string>();

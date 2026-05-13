@@ -16,9 +16,43 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { PATHS } from "./config";
 import type { Checkpoint, ScrapedProduct } from "./types";
 
-const PRODUCTS_FILE = path.resolve(PATHS.rawProductsJsonl);
-const CHECKPOINT_FILE = path.resolve(PATHS.checkpoint);
 const DEBUG_DIR = path.resolve("data/debug");
+
+/**
+ * Файл checkpoint'а. По умолчанию — общий, как до Phase 13.
+ * CLI может его переопределить через `setCheckpointFile()` ДО первого
+ * вызова `loadCheckpoint()` / `saveCheckpoint()`.
+ */
+let CHECKPOINT_FILE = path.resolve(PATHS.checkpoint);
+
+export function setCheckpointFile(p: string): void {
+  CHECKPOINT_FILE = path.resolve(p);
+}
+
+export function getCheckpointFile(): string {
+  return CHECKPOINT_FILE;
+}
+
+/**
+ * Phase 13.1: JSONL продуктов — теперь тоже мутабельный path.
+ * При запуске с --start-path CLI ставит per-category файл, чтобы избежать
+ * write-race при параллельных запусках. Без --start-path остаётся
+ * `data/raw/national-catalog-products.jsonl` (backward-compat).
+ *
+ * `appendProduct()` / `loadExistingKeys()` читают это значение динамически,
+ * так что dedup по urls/barcodes ограничен текущим per-category файлом —
+ * cross-category дедупликация продолжает работать через Postgres
+ * (`saveRawProduct` upsert по sourceUrl).
+ */
+let PRODUCTS_FILE = path.resolve(PATHS.rawProductsJsonl);
+
+export function setJsonlFile(p: string): void {
+  PRODUCTS_FILE = path.resolve(p);
+}
+
+export function getJsonlFile(): string {
+  return PRODUCTS_FILE;
+}
 
 /* ───────── Filesystem (JSONL + checkpoint + debug) ───────── */
 
@@ -57,14 +91,66 @@ export async function saveCheckpoint(cp: Checkpoint): Promise<void> {
   await fs.writeFile(CHECKPOINT_FILE, JSON.stringify(cp, null, 2));
 }
 
-export async function loadExistingKeys(): Promise<{
+export interface LoadExistingKeysOptions {
+  /**
+   * Phase 13.1+: помимо текущего per-category JSONL (`PRODUCTS_FILE`)
+   * также прогрузить legacy общий файл `data/raw/national-catalog-products.jsonl`.
+   *
+   * Зачем: вернуть кросс-категорийную dedup-оптимизацию. Postgres upsert
+   * по `sourceUrl` всё равно защищает от фактических дублей в БД, но без
+   * этого мерджа scraper повторно fetch'ит уже отскрейпленный продукт,
+   * парсит и снова upsert'ит — это лишний CPU/сеть.
+   *
+   * Дефолт = true. Если current file === legacy path (запуск без
+   * `--start-path`), legacy не читается повторно.
+   */
+  includeGlobal?: boolean;
+}
+
+/**
+ * Загрузить known `urls` и `barcodes` для дедупликации.
+ *
+ * Phase 13.1+:
+ *   - всегда читает `PRODUCTS_FILE` (текущий per-category или legacy)
+ *   - если `includeGlobal !== false` И current file отличается от legacy
+ *     — дополнительно читает `data/raw/national-catalog-products.jsonl`
+ *     и мерджит ключи.
+ *
+ * Битые строки JSONL тихо пропускаются. Несуществующие файлы — пустой Set.
+ * Никогда не бросает.
+ */
+export async function loadExistingKeys(
+  options: LoadExistingKeysOptions = {},
+): Promise<{
   urls: Set<string>;
   barcodes: Set<string>;
 }> {
   const urls = new Set<string>();
   const barcodes = new Set<string>();
+
+  const includeGlobal = options.includeGlobal !== false;
+  const legacyFile = path.resolve(PATHS.rawProductsJsonl);
+  const files: string[] = [];
+  // Legacy global файл идёт ПЕРВЫМ — чтобы при совпадении мы успели
+  // увидеть его barcodes/urls, и потом current file просто добавит свои.
+  if (includeGlobal && legacyFile !== PRODUCTS_FILE) {
+    files.push(legacyFile);
+  }
+  files.push(PRODUCTS_FILE);
+
+  for (const file of files) {
+    await loadKeysFromFile(file, urls, barcodes);
+  }
+  return { urls, barcodes };
+}
+
+async function loadKeysFromFile(
+  file: string,
+  urls: Set<string>,
+  barcodes: Set<string>,
+): Promise<void> {
   try {
-    const raw = await fs.readFile(PRODUCTS_FILE, "utf-8");
+    const raw = await fs.readFile(file, "utf-8");
     for (const line of raw.split("\n")) {
       if (!line.trim()) continue;
       try {
@@ -85,7 +171,6 @@ export async function loadExistingKeys(): Promise<{
   } catch {
     /* файла нет — норм */
   }
-  return { urls, barcodes };
 }
 
 export async function appendProduct(p: ScrapedProduct): Promise<void> {

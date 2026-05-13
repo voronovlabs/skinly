@@ -37,6 +37,10 @@ export interface Checkpoint {
   failed: { url: string; reason: string; at: string }[];
   startedAt: string;
   updatedAt: string;
+  /** Phase 13.1: slug категории, под которой создан checkpoint. Опционально. */
+  categorySlug?: string;
+  /** Phase 13.1: стартовый path BFS-обхода. Опционально. */
+  startPath?: string;
 }
 
 export interface ScrapeStats {
