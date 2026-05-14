@@ -58,6 +58,7 @@ import {
   releaseLock,
   setupLockCleanup,
 } from "./national-catalog/active-scrapers";
+import { isProductInScope } from "./national-catalog/scope";
 import type { ScrapeStats } from "./national-catalog/types";
 
 const log = (msg: string) =>
@@ -279,6 +280,9 @@ async function main(): Promise<void> {
   };
 
   let scrapedThisRun = 0;
+  // Phase 13.5: out-of-scope skip counter. Локальный — ScrapeStats не трогаем,
+  // чтобы не менять контракт типов.
+  let outOfScopeSkipped = 0;
   for (const path of remaining) {
     if (scrapedThisRun >= args.limit) break;
 
@@ -295,6 +299,22 @@ async function main(): Promise<void> {
     try {
       const html = await fetchHtml(url, log);
       const product = parseProductPage(html, url);
+
+      // Phase 13.5: final scope guard. Если scraper запущен с --start-path,
+      // продукт обязан лежать под "Косметика и парфюмерия" в breadcrumb'ах
+      // (и под known title startPath'а, если он в map'е scope.ts).
+      // Любой leak (discovery подхватил чужую категорию) — здесь обрубается:
+      // НЕ пишем JSONL, НЕ upsert'им Postgres, НЕ помечаем processedUrls.
+      const scope = isProductInScope(product, args.startPath);
+      if (!scope.ok) {
+        outOfScopeSkipped++;
+        log(
+          `SKIP out-of-scope categoryPath ${url}` +
+            (scope.reason ? ` — ${scope.reason}` : "") +
+            ` · breadcrumbs=[${product.categoryPath.join(" > ")}]`,
+        );
+        continue;
+      }
 
       if (product.barcode && existing.barcodes.has(product.barcode)) {
         stats.duplicatesSkipped++;
@@ -355,6 +375,7 @@ async function main(): Promise<void> {
   log("DONE");
   log(`  category slug:          ${lockSlug}`);
   log(`  scraped:                ${stats.productsScraped}`);
+  log(`  out-of-scope skipped:   ${outOfScopeSkipped}`);
   log(`  duplicates skipped:     ${stats.duplicatesSkipped}`);
   log(`  without barcode:        ${stats.productsWithoutBarcode}`);
   log(`  without image:          ${stats.productsWithoutImage}`);
