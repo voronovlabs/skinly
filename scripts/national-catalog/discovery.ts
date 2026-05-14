@@ -141,7 +141,38 @@ interface ClassifiedLink {
   barcode?: string | null;
 }
 
-function classifyHref(href: string, baseUrl: string): ClassifiedLink {
+/**
+ * Phase 13.4 · «island discovery».
+ *
+ * Когда BFS стартует с произвольной подкатегории (`--start-path /X/`),
+ * мы НЕ хотим, чтобы он уезжал в:
+ *   - / (homepage)
+ *   - /kosmetika-i-parfyumeriya/ (root)
+ *   - другие top-level косметические разделы (`/parfyumeriya/`, `/myla/`, ...)
+ *
+ * Поэтому передаём в `classifyHref` контекст:
+ *   - `islandMode: true` отключает старый allowlist `matchesCosmeticPrefix`
+ *     (он не покрывает «плоские» внуки вроде `/pincety/`).
+ *   - вместо этого: blacklist глобальных «навигационных» путей. Категория
+ *     принимается, если она НЕ в blacklist'е и path-выглядит как категория.
+ *
+ * Graph-based traversal достигается естественно: BFS-очередь стартует с
+ * `startPath`, ссылки на блэклист отбрасываются, и в очередь попадают только
+ * категории, найденные через цепочку уже акцептированных страниц.
+ */
+export interface ClassifyContext {
+  islandMode: boolean;
+  /** Set путей в формате pathname (без query/hash). */
+  islandBlacklist?: Set<string>;
+}
+
+const DEFAULT_CTX: ClassifyContext = { islandMode: false };
+
+function classifyHref(
+  href: string,
+  baseUrl: string,
+  ctx: ClassifyContext = DEFAULT_CTX,
+): ClassifiedLink {
   const abs = absolutize(href, baseUrl);
   if (!abs) {
     return {
@@ -176,7 +207,59 @@ function classifyHref(href: string, baseUrl: string): ClassifiedLink {
     };
   }
 
-  // 2) Category — только из allowlist'а, чтобы не уходить в /produkty/, /odezhda/ и т.п.
+  // 2a) Island mode — graph-based, без allowlist'а.
+  if (ctx.islandMode && ctx.islandBlacklist) {
+    // homepage отдельно (pn === "/")
+    if (pn === "/") {
+      return {
+        href,
+        abs,
+        pathOnly: p,
+        classification: "rejected",
+        reason: "homepage (island mode)",
+      };
+    }
+    // Для blacklist'а сравниваем по pathname (без query) — иначе
+    // `/myla/?page=2` проскочит мимо записи `/myla/`.
+    if (ctx.islandBlacklist.has(pn)) {
+      return {
+        href,
+        abs,
+        pathOnly: p,
+        classification: "rejected",
+        reason: "global-nav blacklist (island mode)",
+      };
+    }
+    if (hasUnwantedQuery(p)) {
+      return {
+        href,
+        abs,
+        pathOnly: p,
+        classification: "rejected",
+        reason: "filter/sort query string",
+      };
+    }
+    if (p.endsWith("/") || isPagination(p)) {
+      return {
+        href,
+        abs,
+        pathOnly: p,
+        classification: "category",
+        reason: isPagination(p)
+          ? "island pagination"
+          : "island category (trailing slash)",
+      };
+    }
+    return {
+      href,
+      abs,
+      pathOnly: p,
+      classification: "rejected",
+      reason: "non-category path in island mode",
+    };
+  }
+
+  // 2b) Legacy mode — категория только из allowlist'а.
   if (matchesCosmeticPrefix(p)) {
     if (hasUnwantedQuery(p)) {
       return {
@@ -214,6 +297,59 @@ function classifyHref(href: string, baseUrl: string): ClassifiedLink {
     classification: "rejected",
     reason: `not /product/<barcode>; outside cosmetic allowlist (head=${head})`,
   };
+}
+
+/**
+ * Глобальные «навигационные» пути сайта, которые могут торчать в шапке/футере
+ * любой категории. Заносим их в blacklist в island mode, чтобы BFS не утёк
+ * через cross-сайтовое меню. Этот список безопасно расширять — все его
+ * элементы заведомо не-категория-продуктов.
+ */
+const GLOBAL_NAV_PATHS: ReadonlyArray<string> = [
+  "/about/",
+  "/help/",
+  "/faq/",
+  "/contacts/",
+  "/contact/",
+  "/login/",
+  "/register/",
+  "/search/",
+  "/cart/",
+  "/checkout/",
+  "/profile/",
+  "/news/",
+  "/blog/",
+  "/sitemap/",
+  // top-level «не косметика» разделы национального каталога —
+  // явно блочим, на случай если есть перекрёстные ссылки:
+  "/produkty/",
+  "/eda/",
+  "/odezhda/",
+  "/elektronika/",
+  "/b2b/",
+];
+
+/**
+ * Построить blacklist глобальных навигационных путей для island mode.
+ * Сам `startPath` НЕ в blacklist'е — это и есть seed обхода.
+ *
+ * Содержимое:
+ *   - все top-level cosmetic prefixes из `COSMETIC_CATEGORY_PREFIXES`, кроме `startPath`
+ *   - root cosmetic-каталог
+ *   - "/" (homepage)
+ *   - набор `GLOBAL_NAV_PATHS` (about, help, search, cart, b2b и т.п.)
+ */
+function buildIslandBlacklist(startPath: string): Set<string> {
+  const set = new Set<string>();
+  for (const p of COSMETIC_CATEGORY_PREFIXES) {
+    if (p !== startPath) set.add(p);
+  }
+  set.add(ROOT_CATEGORY_PATH);
+  set.add("/");
+  for (const g of GLOBAL_NAV_PATHS) {
+    if (g !== startPath) set.add(g);
+  }
+  return set;
 }
 
 /* ───────── Debug dump ───────── */
@@ -323,13 +459,16 @@ interface DiscoveryOptions {
   /** Игнорировать allowlist категорий, акцептить вообще всё (отладочный fallback). */
   unsafeAcceptAll?: boolean;
   /**
-   * Phase 13: стартовый path для BFS. Если не задан — используется
-   * `ROOT_CATEGORY_PATH` (`/kosmetika-i-parfyumeriya/`).
+   * Phase 13 / 13.4: стартовый path для BFS. Если не задан или равен
+   * `ROOT_CATEGORY_PATH` — используется legacy «full catalog» режим
+   * (allowlist `COSMETIC_CATEGORY_PREFIXES`).
    *
-   * Сам startPath НЕ обязан совпадать с `COSMETIC_CATEGORY_PREFIXES` —
-   * мы его в любом случае посетим. А вот его подкатегории фильтруются
-   * матчингом `matchesCosmeticPrefix`. Чтобы scope'ить новый раздел —
-   * добавьте его в `COSMETIC_CATEGORY_PREFIXES`.
+   * Любой другой `startPath` активирует **island discovery** (Phase 13.4):
+   *   - BFS начинается с `startPath` и расширяется ТОЛЬКО через граф ссылок,
+   *     встреченных на уже посещённых страницах;
+   *   - глобальные навигационные ссылки (`/`, root cosmetic-каталог,
+   *     остальные top-level cosmetic prefixes) занесены в blacklist и
+   *     не приводят к уезжанию BFS в соседние разделы.
    */
   startPath?: string;
 }
@@ -339,13 +478,34 @@ interface DiscoveryStats {
   categoriesFound: number;
   productsFound: number;
   csrAnalysis?: { likelyCsr: boolean; reasons: string[] };
+  /** Phase 13.4: сколько category-ссылок прошли через classifier как accepted. */
+  categoryLinksAccepted?: number;
+  /** Phase 13.4: сколько category-ссылок отвергнуты (всего, любая причина). */
+  categoryLinksRejected?: number;
+  /** Phase 13.4: подмножество rejected — отбито global-nav blacklist'ом. */
+  categoryLinksRejectedByBlacklist?: number;
 }
 
 export async function discoverProducts(
   opts: DiscoveryOptions,
 ): Promise<{ urls: string[]; stats: DiscoveryStats }> {
   const startPath = opts.startPath ?? ROOT_CATEGORY_PATH;
-  opts.log(`[discovery] BFS startPath=${startPath}`);
+
+  // Phase 13.4: island mode = startPath отличается от root cosmetic-каталога.
+  const islandMode = startPath !== ROOT_CATEGORY_PATH;
+  const islandBlacklist = islandMode
+    ? buildIslandBlacklist(startPath)
+    : undefined;
+  const ctx: ClassifyContext = islandBlacklist
+    ? { islandMode: true, islandBlacklist }
+    : { islandMode: false };
+
+  opts.log(
+    `[discovery] BFS startPath=${startPath} islandMode=${islandMode}${
+      islandBlacklist ? ` blacklistSize=${islandBlacklist.size}` : ""
+    }`,
+  );
+
   const queue: string[] = [startPath];
   const visited = new Set<string>();
   const products = new Set<string>();
@@ -356,6 +516,9 @@ export async function discoverProducts(
 
   let pagesVisited = 0;
   let totalProductDuplicatesSkipped = 0;
+  let categoryLinksAccepted = 0;
+  let categoryLinksRejected = 0;
+  let categoryLinksRejectedByBlacklist = 0;
   let csrAnalysis: DiscoveryStats["csrAnalysis"];
   let rootDumped = false;
 
@@ -406,7 +569,7 @@ export async function discoverProducts(
     let rejectedHere = 0;
 
     for (const href of anchors) {
-      const c = classifyHref(href, fullUrl);
+      const c = classifyHref(href, fullUrl, ctx);
 
       if (opts.unsafeAcceptAll && c.pathOnly && c.classification !== "category") {
         if (!products.has(c.pathOnly)) {
@@ -437,9 +600,27 @@ export async function discoverProducts(
       ) {
         categories.add(c.pathOnly);
         foundCategoriesHere++;
+        categoryLinksAccepted++;
+        if (islandMode && opts.debug) {
+          opts.log(`[discovery]   ✓ island accept-category ${c.pathOnly}`);
+        }
         queue.push(c.pathOnly);
       } else {
         rejectedHere++;
+        if (c.classification === "rejected") {
+          categoryLinksRejected++;
+          if (
+            c.reason.startsWith("global-nav blacklist") ||
+            c.reason.startsWith("homepage")
+          ) {
+            categoryLinksRejectedByBlacklist++;
+            if (islandMode && opts.debug) {
+              opts.log(
+                `[discovery]   ✗ island reject ${c.pathOnly ?? c.href} (${c.reason})`,
+              );
+            }
+          }
+        }
       }
     }
 
@@ -450,15 +631,25 @@ export async function discoverProducts(
     if (nextHref) {
       const nextAbs = absolutize(nextHref, fullUrl);
       const nextPath = nextAbs ? pathOnly(nextAbs) : null;
-      if (
+      const nextPathname = nextAbs ? pathnameOnly(nextAbs) : null;
+      // В island mode: paginate, если pathname НЕ в blacklist'е и не root.
+      // В legacy mode: старая проверка через allowlist.
+      const acceptNext =
         nextPath &&
-        matchesCosmeticPrefix(nextPath) &&
+        nextPathname &&
+        (islandMode
+          ? !islandBlacklist!.has(nextPathname) && nextPathname !== "/"
+          : matchesCosmeticPrefix(nextPath));
+      if (
+        acceptNext &&
+        nextPath &&
         !visited.has(nextPath) &&
         !categories.has(nextPath)
       ) {
         categories.add(nextPath);
         queue.push(nextPath);
         foundCategoriesHere++;
+        categoryLinksAccepted++;
       }
     }
 
@@ -478,7 +669,12 @@ export async function discoverProducts(
   }
 
   opts.log(
-    `[discovery] DONE pages=${pagesVisited}, categories=${categories.size}, products=${products.size}, dupSkipped=${totalProductDuplicatesSkipped}`,
+    `[discovery] DONE pages=${pagesVisited}, categories=${categories.size}, ` +
+      `products=${products.size}, dupSkipped=${totalProductDuplicatesSkipped}` +
+      (islandMode
+        ? `, cat-accepted=${categoryLinksAccepted}, cat-rejected=${categoryLinksRejected}` +
+          ` (blacklist=${categoryLinksRejectedByBlacklist})`
+        : ""),
   );
 
   return {
@@ -488,6 +684,9 @@ export async function discoverProducts(
       categoriesFound: categories.size,
       productsFound: products.size,
       csrAnalysis,
+      categoryLinksAccepted,
+      categoryLinksRejected,
+      categoryLinksRejectedByBlacklist,
     },
   };
 }
