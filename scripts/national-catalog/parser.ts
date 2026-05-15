@@ -37,6 +37,12 @@ function isKnownSection(title: string): boolean {
 /** Достаёт key-value из любого DOM-фрагмента. */
 function extractKeyValue($: Cheerio$, $scope: Scope): Record<string, string> {
   const out: Record<string, string> = {};
+  const put = (k: string, v: string) => {
+    if (!k || !v) return;
+    if (k === v) return;
+    if (k.length > 120) return; // защита от мусорного label'а
+    if (!out[k]) out[k] = v;
+  };
 
   // Раскладка 1: tables
   $scope.find("table").each((_, tbl) => {
@@ -47,7 +53,7 @@ function extractKeyValue($: Cheerio$, $scope: Scope): Record<string, string> {
         if (cells.length < 2) return;
         const k = clean($(cells[0]).text());
         const v = clean($(cells[cells.length - 1]).text());
-        if (k && v && !out[k]) out[k] = v;
+        put(k, v);
       });
   });
 
@@ -58,25 +64,83 @@ function extractKeyValue($: Cheerio$, $scope: Scope): Record<string, string> {
     for (let i = 0; i < Math.min(dts.length, dds.length); i++) {
       const k = clean($(dts[i]).text());
       const v = clean($(dds[i]).text());
-      if (k && v && !out[k]) out[k] = v;
+      put(k, v);
     }
   });
 
-  // Раскладка 3: div-based rows
+  // Раскладка 3: row-контейнеры с явными label/value class-токенами.
+  // Расширили список: добавили compose/composition/ingredient/info/spec/feature.
   $scope
-    .find("[class*='row'], [class*='param'], [class*='attr'], [class*='prop']")
+    .find(
+      [
+        "[class*='row']",
+        "[class*='param']",
+        "[class*='attr']",
+        "[class*='prop']",
+        "[class*='info']",
+        "[class*='spec']",
+        "[class*='feature']",
+        "[class*='detail']",
+        "[class*='compose']",
+        "[class*='composition']",
+        "[class*='ingredient']",
+      ].join(", "),
+    )
     .each((_, row) => {
       const $row = $(row);
       const k = clean(
         $row
-          .find("[class*='name'], [class*='label'], [class*='title'], [class*='key']")
+          .find(
+            "[class*='name'], [class*='label'], [class*='title'], [class*='key']",
+          )
           .first()
           .text(),
       );
       const v = clean(
         $row.find("[class*='value'], [class*='val']").first().text(),
       );
-      if (k && v && !out[k]) out[k] = v;
+      put(k, v);
+    });
+
+  // Phase 13.7 · Раскладка 4: «row с ровно двумя смысловыми детьми».
+  //
+  // На национальном каталоге часть характеристик (включая «Состав товара, 1»)
+  // рендерится как `<div class="row"><div>Label</div><div>Value</div></div>`
+  // или `<li><span>Label</span><span>Value</span></li>` — без `class*='label'` /
+  // `class*='value'`, поэтому раскладка 3 их не ловит.
+  //
+  // Здесь ищем любые row-кандидаты с ровно 2 element-children, оба с текстом,
+  // и применяем «первый = label, второй = value». Защита от false-positive:
+  //   - skip если у первого ребёнка есть ссылки/кнопки (это меню);
+  //   - skip если оба ребёнка text-only ровно равны (label/separator артефакт);
+  //   - skip если label > 120 символов (это уже не label).
+  $scope
+    .find(
+      [
+        "tr",
+        "li",
+        "[class*='row']",
+        "[class*='param']",
+        "[class*='attr']",
+        "[class*='prop']",
+        "[class*='info']",
+        "[class*='spec']",
+        "[class*='feature']",
+        "[class*='detail']",
+        "[class*='item']",
+      ].join(", "),
+    )
+    .each((_, row) => {
+      const $row = $(row);
+      const $children = $row.children();
+      if ($children.length !== 2) return;
+      const $first = $children.eq(0);
+      const $second = $children.eq(1);
+      // Меню-like: ссылки/кнопки внутри — пропускаем.
+      if ($first.find("a, button").length > 0) return;
+      const k = clean($first.text());
+      const v = clean($second.text());
+      put(k, v);
     });
 
   return out;
@@ -379,12 +443,22 @@ export function parseProductPage(
     },
   );
 
-  // Fallback: если не нашли ни одной известной секции — собираем всё со всей body.
-  if (Object.keys(characteristics).length === 0) {
-    const all = extractKeyValue($, $("body"));
-    if (Object.keys(all).length > 0) {
-      characteristics["__unstructured__"] = all;
-    }
+  // Phase 13.7: ВСЕГДА дополнительно собираем body-wide key-value.
+  //
+  // Раньше fallback срабатывал только при пустом characteristics — но
+  // "Состав" / "Ingredients" / "INCI" не входят в KNOWN_SECTIONS (config.ts),
+  // поэтому секция Состава скипалась, даже если другие known-секции
+  // («Идентификация товара» и т.п.) нашлись.
+  //
+  // Теперь раскладки 1–4 прогоняются по всему `<body>` и добавляют ВСЕ
+  // не-дублированные key/value в дополнительный bucket "__all__". Сюда
+  // попадает и «Состав товара, 1», и любые прочие spec'ы вне known секций.
+  // characteristics старых секций НЕ перетираются — у них приоритет (put()
+  // в extractKeyValue игнорирует уже занятые ключи).
+  const bodyWideAll = extractKeyValue($, $("body"));
+  if (Object.keys(bodyWideAll).length > 0) {
+    const existing = characteristics["__all__"] ?? {};
+    characteristics["__all__"] = { ...bodyWideAll, ...existing };
   }
 
   // ── Flatten ─────────────────────────────────────────────
@@ -394,6 +468,13 @@ export function parseProductPage(
       if (!flatAttributes[k]) flatAttributes[k] = v;
     }
   }
+
+  // Phase 13.7: дублируем flatAttributes как массив объектов
+  // `{name, value}`. Тот же самый набор данных, просто удобнее для
+  // downstream SQL (`payload->'attributes'`) и для нормализатора.
+  const attributes: Array<{ name: string; value: string }> = Object.entries(
+    flatAttributes,
+  ).map(([name, value]) => ({ name, value }));
 
   // ── Известные поля ──────────────────────────────────────
   // Сначала пробуем достать barcode из HTML-атрибутов (самый «доверенный» источник).
@@ -419,7 +500,23 @@ export function parseProductPage(
   const signer = lookup(flatAttributes, "заявитель", "подписант");
   const importer = lookup(flatAttributes, "импортер", "импортёр");
 
-  const compositionRaw = lookup(flatAttributes, "состав", "inci", "ингредиент");
+  // Phase 13.7: композиция. Прямые matches приоритетнее fuzzy lookup'а,
+  // потому что у нас встречается несколько вариантов "Состав товара, 1",
+  // "Состав товара, 2" etc. — берём первый непустой.
+  const compositionRaw =
+    flatAttributes["Состав товара, 1"] ??
+    flatAttributes["Состав товара"] ??
+    flatAttributes["Состав"] ??
+    flatAttributes["Ingredients"] ??
+    flatAttributes["INCI"] ??
+    lookup(
+      flatAttributes,
+      "состав товара",
+      "состав",
+      "ingredients",
+      "inci",
+      "ингредиент",
+    );
 
   return {
     source: "national_catalog",
@@ -436,6 +533,7 @@ export function parseProductPage(
     compositionRaw: compositionRaw || null,
     characteristics,
     flatAttributes,
+    attributes,
     scrapedAt: new Date().toISOString(),
   };
 }

@@ -25,6 +25,15 @@ export interface ScrapedProduct {
   characteristics: Record<string, Record<string, string>>;
   /** Та же структура, но плоская — удобно для нормализации. */
   flatAttributes: Record<string, string>;
+  /**
+   * Phase 13.7: дополнительное представление всех key/value атрибутов
+   * в виде массива объектов. Идентично данным `flatAttributes`, просто
+   * проще для downstream consumer'ов и для SQL-запросов вида
+   * `payload->'attributes'`.
+   *
+   * Optional — старые JSONL / Postgres rows без этого поля совместимы.
+   */
+  attributes?: Array<{ name: string; value: string }>;
   scrapedAt: string;
 }
 
