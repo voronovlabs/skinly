@@ -179,6 +179,20 @@ export interface ClassifyContext {
 const DEFAULT_CTX: ClassifyContext = { islandMode: false };
 
 /**
+ * Phase 13.7+: настройки программной пагинации в strict-mode.
+ *
+ * - STRICT_MAX_PAGES_CAP — жёсткий потолок числа pre-populated страниц.
+ *   Защита от случая «опечатался в --limit и хочу 100k».
+ * - STRICT_EMPTY_PAGE_THRESHOLD — сколько подряд пустых / 404 страниц
+ *   останавливают обход (мы дошли до конца каталога).
+ * - STRICT_PRODUCTS_PER_PAGE_ESTIMATE — ориентировочное число товаров на
+ *   странице (для расчёта maxStrictPages из target limit).
+ */
+const STRICT_MAX_PAGES_CAP = 1000;
+const STRICT_EMPTY_PAGE_THRESHOLD = 3;
+const STRICT_PRODUCTS_PER_PAGE_ESTIMATE = 20;
+
+/**
  * Phase 13.6: strict-category pagination matcher.
  *
  * Принимает:
@@ -558,6 +572,12 @@ interface DiscoveryStats {
   categoryLinksRejected?: number;
   /** Phase 13.4: подмножество rejected — отбито global-nav blacklist'ом. */
   categoryLinksRejectedByBlacklist?: number;
+  /** Phase 13.7+: сколько strict-pagination страниц мы программно пред-сгенерили. */
+  strictPagesGenerated?: number;
+  /** Phase 13.7+: сколько из них реально посетили (включая 404/empty). */
+  strictPagesVisited?: number;
+  /** Phase 13.7+: сколько вернули 0 product-ссылок (= конец каталога). */
+  strictEmptyPages?: number;
 }
 
 export async function discoverProducts(
@@ -608,10 +628,55 @@ export async function discoverProducts(
   let csrAnalysis: DiscoveryStats["csrAnalysis"];
   let rootDumped = false;
 
+  /* ──────── Phase 13.7+ · программная strict-pagination ──────── */
+  //
+  // Сайт показывает в DOM ограниченное окно пагинации, поэтому полагаться на
+  // rel="next" не получается — мы добирали ~30% реальных pageN'ов.
+  // В strict-mode пред-генерируем последовательность `${startPath}pageN/` и
+  // кладём её в queue ДО старта BFS. Каждая страница в queue получает «доверие»
+  // через `categories.add(...)`, чтобы DOM-ссылки на эти же pageN'ы не пушились
+  // повторно.
+  //
+  // BFS останавливается, когда подряд `STRICT_EMPTY_PAGE_THRESHOLD` страниц
+  // вернули 0 product-ссылок (это значит: дошли до конца каталога).
+  let strictPagesGenerated = 0;
+  let strictPagesVisited = 0;
+  let strictEmptyPages = 0;
+  let strictConsecutiveEmpty = 0;
+  let maxStrictPages = 0;
+  if (strictCategory) {
+    maxStrictPages = Math.min(
+      STRICT_MAX_PAGES_CAP,
+      Math.ceil(opts.limit / STRICT_PRODUCTS_PER_PAGE_ESTIMATE) + 50,
+    );
+    for (let i = 2; i <= maxStrictPages; i++) {
+      const p = `${startPath}page${i}/`;
+      if (!categories.has(p)) {
+        categories.add(p);
+        queue.push(p);
+        strictPagesGenerated++;
+      }
+    }
+    // page1 — это сам startPath, он уже в queue.
+    strictPagesGenerated += 1;
+    opts.log(
+      `[discovery] strict pagination pre-generated ${strictPagesGenerated} pages ` +
+        `(target=${opts.limit}, cap=${STRICT_MAX_PAGES_CAP}, ` +
+        `stopAfter=${STRICT_EMPTY_PAGE_THRESHOLD} empty)`,
+    );
+  }
+
+  // В strict-mode pages-cap расширяем под программную пагинацию + небольшой
+  // запас на DOM-приходящие rel=next. В легаси/island режимах оставляем
+  // прежний лимит `MAX_CATEGORY_PAGES_VISITED`.
+  const pagesCap = strictCategory
+    ? maxStrictPages + 50
+    : MAX_CATEGORY_PAGES_VISITED;
+
   while (
     queue.length > 0 &&
     products.size < opts.limit &&
-    pagesVisited < MAX_CATEGORY_PAGES_VISITED
+    pagesVisited < pagesCap
   ) {
     const current = queue.shift()!;
     if (visited.has(current)) continue;
@@ -622,8 +687,11 @@ export async function discoverProducts(
 
     pagesVisited++;
     opts.log(
-      `[discovery] [${pagesVisited}/${MAX_CATEGORY_PAGES_VISITED}] visit ${current} (queue=${queue.length}, products=${products.size}/${opts.limit})`,
+      `[discovery] [${pagesVisited}/${pagesCap}] visit ${current} (queue=${queue.length}, products=${products.size}/${opts.limit})`,
     );
+
+    const isStrictPage =
+      strictCategory && isStrictAllowedCategory(current, startPath);
 
     let html: string;
     try {
@@ -632,6 +700,19 @@ export async function discoverProducts(
       opts.log(
         `[discovery] FAIL ${current}: ${e instanceof Error ? e.message : e}`,
       );
+      // В strict-mode failed fetch (404 / network) считаем «empty page» —
+      // 3 подряд таких страниц = конец каталога.
+      if (isStrictPage) {
+        strictPagesVisited++;
+        strictEmptyPages++;
+        strictConsecutiveEmpty++;
+        if (strictConsecutiveEmpty >= STRICT_EMPTY_PAGE_THRESHOLD) {
+          opts.log(
+            `[discovery] strict pagination stop: consecutiveEmptyPages=${strictConsecutiveEmpty} (fetch failed)`,
+          );
+          break;
+        }
+      }
       continue;
     }
 
@@ -747,6 +828,26 @@ export async function discoverProducts(
     opts.log(
       `[discovery]   total <a>=${anchors.length} | /product/ raw=${rawProductLinksHere}, +${newProductsHere} new, ${duplicateProductsHere} dup | +${foundCategoriesHere} sub-pages | ${rejectedHere} rejected`,
     );
+
+    // Phase 13.7+: strict-pagination accounting + early stop.
+    if (isStrictPage) {
+      strictPagesVisited++;
+      if (rawProductLinksHere === 0) {
+        strictEmptyPages++;
+        strictConsecutiveEmpty++;
+        opts.log(
+          `[discovery] strict pagination empty page (consecutiveEmpty=${strictConsecutiveEmpty}) on ${current}`,
+        );
+        if (strictConsecutiveEmpty >= STRICT_EMPTY_PAGE_THRESHOLD) {
+          opts.log(
+            `[discovery] strict pagination stop: consecutiveEmptyPages=${strictConsecutiveEmpty}`,
+          );
+          break;
+        }
+      } else {
+        strictConsecutiveEmpty = 0;
+      }
+    }
   }
 
   // Итоговый лог: показываем первые до 20 product-ссылок (полезно для глаз)
@@ -765,6 +866,10 @@ export async function discoverProducts(
       (islandMode
         ? `, cat-accepted=${categoryLinksAccepted}, cat-rejected=${categoryLinksRejected}` +
           ` (blacklist=${categoryLinksRejectedByBlacklist})`
+        : "") +
+      (strictCategory
+        ? `, strictPagesGenerated=${strictPagesGenerated}, strictPagesVisited=${strictPagesVisited}` +
+          `, strictEmptyPages=${strictEmptyPages}`
         : ""),
   );
 
@@ -778,6 +883,9 @@ export async function discoverProducts(
       categoryLinksAccepted,
       categoryLinksRejected,
       categoryLinksRejectedByBlacklist,
+      strictPagesGenerated: strictCategory ? strictPagesGenerated : undefined,
+      strictPagesVisited: strictCategory ? strictPagesVisited : undefined,
+      strictEmptyPages: strictCategory ? strictEmptyPages : undefined,
     },
   };
 }
