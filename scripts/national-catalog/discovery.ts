@@ -164,9 +164,49 @@ export interface ClassifyContext {
   islandMode: boolean;
   /** Set путей в формате pathname (без query/hash). */
   islandBlacklist?: Set<string>;
+  /**
+   * Phase 13.6: жёсткий режим — крауль ходит ТОЛЬКО по `strictStartPath` и
+   * по его pagination-страницам. Любые другие category-ссылки отвергаются.
+   * Product-ссылки классифицируются как раньше — они придут только со
+   * страниц, прошедших strict-проверку, потому что в queue ничего другого
+   * не попадает.
+   */
+  strictCategory?: boolean;
+  /** Нормализованный startPath, против которого матчится strict-pagination. */
+  strictStartPath?: string;
 }
 
 const DEFAULT_CTX: ClassifyContext = { islandMode: false };
+
+/**
+ * Phase 13.6: strict-category pagination matcher.
+ *
+ * Принимает:
+ *   - точное совпадение со `startPath` (с опц. `?page=N` / `?p=N`)
+ *   - `startPath + "pageN/"` или `startPath + "page-N/"` (slash-style pagination,
+ *     основная форма на национальном каталоге)
+ *
+ * Всё остальное — НЕ ходим.
+ */
+function isStrictAllowedCategory(rawPath: string, startPath: string): boolean {
+  const idx = rawPath.indexOf("?");
+  const pn = idx >= 0 ? rawPath.slice(0, idx) : rawPath;
+  const qs = idx >= 0 ? rawPath.slice(idx) : "";
+
+  if (pn === startPath) {
+    if (!qs) return true;
+    return /^\?(page|p)=\d+$/i.test(qs);
+  }
+
+  if (pn.startsWith(startPath)) {
+    const tail = pn.slice(startPath.length);
+    if (/^page-?\d+\/?$/i.test(tail)) {
+      return !qs || /^\?(page|p)=\d+$/i.test(qs);
+    }
+  }
+
+  return false;
+}
 
 function classifyHref(
   href: string,
@@ -204,6 +244,29 @@ function classifyHref(
       classification: "product",
       reason: "matches /product/<barcode>",
       barcode: extractBarcode(pn),
+    };
+  }
+
+  // 1.5) Strict-category mode — перебивает island. Категория принимается
+  //      ТОЛЬКО если path == strictStartPath или это его pageN-пагинация.
+  if (ctx.strictCategory && ctx.strictStartPath) {
+    if (isStrictAllowedCategory(p, ctx.strictStartPath)) {
+      return {
+        href,
+        abs,
+        pathOnly: p,
+        classification: "category",
+        reason: p === ctx.strictStartPath
+          ? "strict category (self)"
+          : "strict category (pagination)",
+      };
+    }
+    return {
+      href,
+      abs,
+      pathOnly: p,
+      classification: "rejected",
+      reason: "outside strict category",
     };
   }
 
@@ -471,6 +534,17 @@ interface DiscoveryOptions {
    *     не приводят к уезжанию BFS в соседние разделы.
    */
   startPath?: string;
+  /**
+   * Phase 13.6: жёсткий режим. Активируется CLI флагом `--strict-category` +
+   * `--start-path`. В этом режиме:
+   *   - queue/категории = { startPath, startPath + pageN/, ... };
+   *   - любые другие category-ссылки (соседние / sub / sibling / breadcrumb)
+   *     отвергаются с reason "outside strict category";
+   *   - product-ссылки на принятых страницах собираются как обычно.
+   *
+   * Без `--start-path` флаг игнорируется (no-op).
+   */
+  strictCategory?: boolean;
 }
 
 interface DiscoveryStats {
@@ -493,17 +567,29 @@ export async function discoverProducts(
 
   // Phase 13.4: island mode = startPath отличается от root cosmetic-каталога.
   const islandMode = startPath !== ROOT_CATEGORY_PATH;
-  const islandBlacklist = islandMode
-    ? buildIslandBlacklist(startPath)
-    : undefined;
-  const ctx: ClassifyContext = islandBlacklist
-    ? { islandMode: true, islandBlacklist }
-    : { islandMode: false };
+  // Phase 13.6: strict-category — имеет смысл только при non-root startPath.
+  const strictCategory = Boolean(opts.strictCategory) && islandMode;
+
+  const islandBlacklist =
+    islandMode && !strictCategory ? buildIslandBlacklist(startPath) : undefined;
+
+  let ctx: ClassifyContext;
+  if (strictCategory) {
+    ctx = {
+      islandMode: true,
+      strictCategory: true,
+      strictStartPath: startPath,
+    };
+  } else if (islandBlacklist) {
+    ctx = { islandMode: true, islandBlacklist };
+  } else {
+    ctx = { islandMode: false };
+  }
 
   opts.log(
-    `[discovery] BFS startPath=${startPath} islandMode=${islandMode}${
-      islandBlacklist ? ` blacklistSize=${islandBlacklist.size}` : ""
-    }`,
+    `[discovery] BFS startPath=${startPath} islandMode=${islandMode}` +
+      (strictCategory ? " strictCategory=true" : "") +
+      (islandBlacklist ? ` blacklistSize=${islandBlacklist.size}` : ""),
   );
 
   const queue: string[] = [startPath];
@@ -632,14 +718,19 @@ export async function discoverProducts(
       const nextAbs = absolutize(nextHref, fullUrl);
       const nextPath = nextAbs ? pathOnly(nextAbs) : null;
       const nextPathname = nextAbs ? pathnameOnly(nextAbs) : null;
-      // В island mode: paginate, если pathname НЕ в blacklist'е и не root.
-      // В legacy mode: старая проверка через allowlist.
-      const acceptNext =
-        nextPath &&
-        nextPathname &&
-        (islandMode
-          ? !islandBlacklist!.has(nextPathname) && nextPathname !== "/"
-          : matchesCosmeticPrefix(nextPath));
+      // Strict: только если pageN/ форма от startPath.
+      // Island: pathname НЕ в blacklist'е и не root.
+      // Legacy: проверка через allowlist.
+      let acceptNext: boolean;
+      if (!nextPath || !nextPathname) {
+        acceptNext = false;
+      } else if (strictCategory) {
+        acceptNext = isStrictAllowedCategory(nextPath, startPath);
+      } else if (islandMode && islandBlacklist) {
+        acceptNext = !islandBlacklist.has(nextPathname) && nextPathname !== "/";
+      } else {
+        acceptNext = matchesCosmeticPrefix(nextPath);
+      }
       if (
         acceptNext &&
         nextPath &&

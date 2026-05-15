@@ -79,6 +79,12 @@ interface CliArgs {
    * автоматически выводится из него, если --state-suffix не указан явно.
    */
   stateSuffix: string | null;
+  /**
+   * Phase 13.6: жёсткий режим — discovery ходит ТОЛЬКО по startPath и его
+   * pageN/-пагинации. Имеет смысл только вместе с --start-path; без него
+   * флаг игнорируется (no-op).
+   */
+  strictCategory: boolean;
 }
 
 function parseCli(): CliArgs {
@@ -93,6 +99,7 @@ function parseCli(): CliArgs {
       "start-path": { type: "string" },
       "start-url": { type: "string" },
       "state-suffix": { type: "string" },
+      "strict-category": { type: "boolean", default: false },
     },
   });
   const limit = parseInt(String(values.limit), 10);
@@ -131,6 +138,7 @@ function parseCli(): CliArgs {
     discoveryOnly: Boolean(values["discovery-only"]),
     startPath,
     stateSuffix,
+    strictCategory: Boolean(values["strict-category"]),
   };
 }
 
@@ -195,7 +203,7 @@ async function main(): Promise<void> {
   log(
     `Starting · limit=${args.limit} resume=${args.resume} rediscover=${args.rediscover} ` +
       `debug=${args.debug} unsafeAcceptAll=${args.unsafeAcceptAll} ` +
-      `discoveryOnly=${args.discoveryOnly} ` +
+      `discoveryOnly=${args.discoveryOnly} strictCategory=${args.strictCategory} ` +
       `categorySlug=${lockSlug} startPath=${args.startPath ?? "(default)"} ` +
       `checkpoint=${checkpointFile} jsonl=${jsonlFile} active=${totalAfterUs}`,
   );
@@ -232,6 +240,7 @@ async function main(): Promise<void> {
       debug: args.debug,
       unsafeAcceptAll: args.unsafeAcceptAll,
       startPath: args.startPath ?? undefined,
+      strictCategory: args.strictCategory,
     });
     log(
       `Discovery done · pages=${stats.pagesVisited}, categories=${stats.categoriesFound}, products=${stats.productsFound}`,
