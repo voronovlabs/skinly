@@ -507,5 +507,24 @@
       "goalAlignment": "{ingredient} aligns with your goal: {goal}",
       "comedogenicForAcne": "{ingredient} may worsen breakouts"
     }
+  },
+  "tutorial": {
+    "ariaLabel": "App walkthrough",
+    "skip": "Skip",
+    "back": "Back",
+    "next": "Next",
+    "getStarted": "Get started",
+    "progress": "Progress",
+    "stepLabel": "Step",
+    "step1Title": "Scan a barcode",
+    "step1Desc": "Point your camera at any beauty product — results appear in seconds.",
+    "step2Title": "AI ingredient analysis",
+    "step2Desc": "We break down every ingredient and evaluate its safety for your skin profile.",
+    "step3Title": "Personal compatibility",
+    "step3Desc": "Find out exactly how well a product suits your skin — no more guessing.",
+    "step4Title": "Better profile, better results",
+    "step4Desc": "Set your skin type and preferences: every scan becomes more accurate.",
+    "step5Title": "You're all set",
+    "step5Desc": "Start with your first scan right now. History and favorites are in the bottom bar."
   }
 }
