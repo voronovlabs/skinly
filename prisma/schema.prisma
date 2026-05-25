@@ -14,6 +14,8 @@
 //
 // Дальнейшие фичи (engine, AI, ratings, GuestSession persistence) —
 // в Phase 6.2+, отдельными миграциями.
+// Phase 15 (hair_profile):
+//   + HairType, ScalpType, HairConcern, HaircareGoal enums + HairProfile model.
 // =============================================================================
 
 generator client {
@@ -66,6 +68,38 @@ enum SkincareGoal {
   MINIMAL_ROUTINE
 }
 
+enum HairType {
+  STRAIGHT
+  WAVY
+  CURLY
+  COILY
+}
+
+enum ScalpType {
+  NORMAL
+  DRY
+  OILY
+  SENSITIVE
+}
+
+enum HairConcern {
+  FRIZZ
+  DAMAGE
+  HAIR_LOSS
+  DANDRUFF
+  DULLNESS
+  SPLIT_ENDS
+}
+
+enum HaircareGoal {
+  HYDRATION
+  VOLUME
+  REPAIR
+  GROWTH
+  COLOR_PROTECTION
+  ANTI_FRIZZ
+}
+
 enum IngredientSafety {
   BENEFICIAL
   NEUTRAL
@@ -104,6 +138,7 @@ model User {
   locale       String   @default("ru")
 
   beautyProfile BeautyProfile?
+  hairProfile   HairProfile?
   favorites     Favorite[]
   scans         ScanHistory[]
 
@@ -131,6 +166,25 @@ model BeautyProfile {
 
   createdAt   DateTime            @default(now())
   updatedAt   DateTime            @updatedAt
+}
+
+// ─────────────────────────── HairProfile (1:1 User) ───────────────────────────
+
+/// Профиль волос. Один на пользователя; удаляется каскадом при удалении user'а.
+model HairProfile {
+  id         String        @id @default(cuid())
+  userId     String        @unique
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  hairType   HairType
+  scalpType  ScalpType
+  concerns   HairConcern[]
+  goal       HaircareGoal
+  /// 0..100 — индикатор заполненности анкеты.
+  completion Int           @default(0)
+
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
 }
 
 // ─────────────────────────── Product / Ingredient ───────────────────────────

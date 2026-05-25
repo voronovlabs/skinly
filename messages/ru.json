@@ -82,6 +82,59 @@
     "ctaGuest": "Продолжить как гость",
     "trustBar": "Работает на ИИ · 50 000+ продуктов · Чистый бьюти-фокус"
   },
+  "hairOnboarding": {
+    "metaTitle": "Анкета профиля волос",
+    "step": "Шаг {current} из {total}",
+    "skip": "Пропустить",
+    "continue": "Продолжить",
+    "complete": "Готово",
+    "questions": {
+      "hairType": {
+        "title": "Какой тип волос у вас?",
+        "subtitle": "Выберите наиболее подходящий вариант",
+        "options": {
+          "straight": "Прямые",
+          "wavy": "Волнистые",
+          "curly": "Кудрявые",
+          "coily": "Упругие кудри"
+        }
+      },
+      "scalpType": {
+        "title": "Какая у вас кожа головы?",
+        "subtitle": "Это поможет подобрать правильный уход",
+        "options": {
+          "normal": "Нормальная",
+          "dry": "Сухая",
+          "oily": "Жирная",
+          "sensitive": "Чувствительная"
+        }
+      },
+      "concerns": {
+        "title": "Что беспокоит ваши волосы?",
+        "subtitle": "Можно выбрать несколько",
+        "options": {
+          "frizz": "Пушистость",
+          "damage": "Повреждение",
+          "hair_loss": "Выпадение",
+          "dandruff": "Перхоть",
+          "dullness": "Тусклость",
+          "split_ends": "Секущиеся кончики"
+        }
+      },
+      "goal": {
+        "title": "Главная цель ухода за волосами?",
+        "subtitle": "Что для вас важнее всего?",
+        "options": {
+          "hydration": "Увлажнение",
+          "volume": "Объём",
+          "repair": "Восстановление",
+          "growth": "Рост",
+          "color_protection": "Защита цвета",
+          "anti_frizz": "Анти-пушистость"
+        }
+      }
+    }
+  },
   "onboarding": {
     "metaTitle": "Анкета профиля кожи",
     "step": "Шаг {current} из {total}",
@@ -275,6 +328,12 @@
     "metaTitle": "Профиль",
     "freePlan": "Бесплатный план",
     "proPlan": "Pro",
+    "upgradePremium": "Подключить премиум",
+    "premiumModalTitle": "Премиум-доступ",
+    "premiumModalBody": "Расширенные функции в разработке. Скоро здесь появятся персональные рекомендации, история анализов и многое другое.",
+    "premiumModalClose": "Понятно",
+    "comingSoonTitle": "В разработке",
+    "comingSoonBody": "Этот раздел появится в ближайшем обновлении.",
     "skinProfileTitle": "Профиль кожи",
     "skinType": "Тип кожи",
     "sensitivity": "Чувствительность",
@@ -327,7 +386,41 @@
       "parabens": "Парабены",
       "essential_oils": "Эфирные масла"
     },
-    "phaseNote": "Phase 3 · auth подключится в Phase 4"
+    "phaseNote": "Phase 3 · auth подключится в Phase 4",
+    "hairProfileTitle": "Профиль волос",
+    "hairType": "Тип волос",
+    "scalpType": "Кожа головы",
+    "hairConcerns": "Проблемы",
+    "hairGoal": "Цель ухода",
+    "editHairProfile": "Изменить профиль волос",
+    "hairTypes": {
+      "straight": "Прямые",
+      "wavy": "Волнистые",
+      "curly": "Кудрявые",
+      "coily": "Упругие кудри"
+    },
+    "scalpTypes": {
+      "normal": "Нормальная",
+      "dry": "Сухая",
+      "oily": "Жирная",
+      "sensitive": "Чувствительная"
+    },
+    "hairConcernLabels": {
+      "frizz": "Пушистость",
+      "damage": "Повреждение",
+      "hair_loss": "Выпадение",
+      "dandruff": "Перхоть",
+      "dullness": "Тусклость",
+      "split_ends": "Секущиеся кончики"
+    },
+    "hairGoalLabels": {
+      "hydration": "Увлажнение",
+      "volume": "Объём",
+      "repair": "Восстановление",
+      "growth": "Рост",
+      "color_protection": "Защита цвета",
+      "anti_frizz": "Анти-пушистость"
+    }
   },
   "compatibility": {
     "loading": "Считаем совместимость…",

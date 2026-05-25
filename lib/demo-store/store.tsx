@@ -17,6 +17,7 @@ import {
 } from "./storage";
 import type {
   DemoAction,
+  DemoHairProfile,
   DemoScan,
   DemoSkinProfile,
   DemoState,
@@ -46,6 +47,9 @@ function reducer(state: DemoState, action: DemoAction): DemoState {
 
     case "setSkinProfile":
       return { ...state, skinProfile: action.payload };
+
+    case "setHairProfile":
+      return { ...state, hairProfile: action.payload };
 
     case "toggleFavorite": {
       const id = action.payload;
@@ -103,6 +107,7 @@ interface DemoStoreContextValue {
   state: DemoState;
   hydrated: boolean;
   setSkinProfile: (profile: DemoSkinProfile) => void;
+  setHairProfile: (profile: DemoHairProfile) => void;
   toggleFavorite: (productId: string) => void;
   addScan: (productId: string) => void;
   toggleCompare: (productId: string) => void;
@@ -150,6 +155,9 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
   const setSkinProfile = useCallback((profile: DemoSkinProfile) => {
     dispatch({ type: "setSkinProfile", payload: profile });
   }, []);
+  const setHairProfile = useCallback((profile: DemoHairProfile) => {
+    dispatch({ type: "setHairProfile", payload: profile });
+  }, []);
   const toggleFavorite = useCallback((productId: string) => {
     dispatch({ type: "toggleFavorite", payload: productId });
   }, []);
@@ -168,6 +176,7 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       state,
       hydrated,
       setSkinProfile,
+      setHairProfile,
       toggleFavorite,
       addScan,
       toggleCompare,
@@ -179,6 +188,7 @@ export function DemoStoreProvider({ children }: { children: ReactNode }) {
       state,
       hydrated,
       setSkinProfile,
+      setHairProfile,
       toggleFavorite,
       addScan,
       toggleCompare,

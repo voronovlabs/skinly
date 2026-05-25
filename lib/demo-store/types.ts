@@ -1,5 +1,9 @@
 import type {
   AvoidedIngredient,
+  HairConcern,
+  HaircareGoal,
+  HairType,
+  ScalpType,
   SkinConcern,
   SkinType,
   SensitivityLevel,
@@ -24,6 +28,14 @@ export interface DemoSkinProfile {
   completion: number;
 }
 
+export interface DemoHairProfile {
+  hairType: HairType | null;
+  scalpType: ScalpType | null;
+  concerns: HairConcern[];
+  goal: HaircareGoal | null;
+  completion: number;
+}
+
 export interface DemoScan {
   /** Уникальный id записи (crypto.randomUUID). */
   id: string;
@@ -36,6 +48,7 @@ export interface DemoState {
   /** Schema version: при разрыве совместимости — мигрируем или сбрасываем. */
   version: number;
   skinProfile: DemoSkinProfile | null;
+  hairProfile: DemoHairProfile | null;
   favoriteIds: string[];
   /** Свежие записи в начале массива. Лимит 100. */
   history: DemoScan[];
@@ -45,6 +58,7 @@ export interface DemoState {
 export type DemoAction =
   | { type: "hydrate"; payload: DemoState }
   | { type: "setSkinProfile"; payload: DemoSkinProfile }
+  | { type: "setHairProfile"; payload: DemoHairProfile }
   | { type: "toggleFavorite"; payload: string }
   | { type: "addScan"; payload: { productId: string } }
   | { type: "toggleCompare"; payload: string }

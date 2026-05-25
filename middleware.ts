@@ -29,6 +29,7 @@ const PROTECTED_PREFIXES = [
   "/scan",
   "/product",
   "/onboarding",
+  "/hair-onboarding",
 ];
 
 /**

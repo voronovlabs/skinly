@@ -82,6 +82,59 @@
     "ctaGuest": "Continue as guest",
     "trustBar": "Powered by AI · 50,000+ products · Clean beauty focused"
   },
+  "hairOnboarding": {
+    "metaTitle": "Hair profile setup",
+    "step": "Step {current} of {total}",
+    "skip": "Skip",
+    "continue": "Continue",
+    "complete": "Complete",
+    "questions": {
+      "hairType": {
+        "title": "What's your hair type?",
+        "subtitle": "Choose the one that describes your hair best",
+        "options": {
+          "straight": "Straight",
+          "wavy": "Wavy",
+          "curly": "Curly",
+          "coily": "Coily"
+        }
+      },
+      "scalpType": {
+        "title": "How would you describe your scalp?",
+        "subtitle": "This helps us pick the right care",
+        "options": {
+          "normal": "Normal",
+          "dry": "Dry",
+          "oily": "Oily",
+          "sensitive": "Sensitive"
+        }
+      },
+      "concerns": {
+        "title": "What are your hair concerns?",
+        "subtitle": "Select all that apply",
+        "options": {
+          "frizz": "Frizz",
+          "damage": "Damage",
+          "hair_loss": "Hair loss",
+          "dandruff": "Dandruff",
+          "dullness": "Dullness",
+          "split_ends": "Split ends"
+        }
+      },
+      "goal": {
+        "title": "Your main hair care goal?",
+        "subtitle": "What matters most to you?",
+        "options": {
+          "hydration": "Hydration",
+          "volume": "Volume",
+          "repair": "Repair",
+          "growth": "Growth",
+          "color_protection": "Colour protection",
+          "anti_frizz": "Anti-frizz"
+        }
+      }
+    }
+  },
   "onboarding": {
     "metaTitle": "Skin profile setup",
     "step": "Step {current} of {total}",
@@ -275,6 +328,12 @@
     "metaTitle": "Profile",
     "freePlan": "Free plan",
     "proPlan": "Pro",
+    "upgradePremium": "Upgrade to Premium",
+    "premiumModalTitle": "Premium access",
+    "premiumModalBody": "Advanced features are on the way. Personalised recommendations, scan history and more — coming soon.",
+    "premiumModalClose": "Got it",
+    "comingSoonTitle": "Coming soon",
+    "comingSoonBody": "This section will be available in a future update.",
     "skinProfileTitle": "Skin profile",
     "skinType": "Skin type",
     "sensitivity": "Sensitivity",
@@ -327,7 +386,41 @@
       "parabens": "Parabens",
       "essential_oils": "Essential oils"
     },
-    "phaseNote": "Phase 3 · auth coming in Phase 4"
+    "phaseNote": "Phase 3 · auth coming in Phase 4",
+    "hairProfileTitle": "Hair profile",
+    "hairType": "Hair type",
+    "scalpType": "Scalp type",
+    "hairConcerns": "Concerns",
+    "hairGoal": "Goal",
+    "editHairProfile": "Edit hair profile",
+    "hairTypes": {
+      "straight": "Straight",
+      "wavy": "Wavy",
+      "curly": "Curly",
+      "coily": "Coily"
+    },
+    "scalpTypes": {
+      "normal": "Normal",
+      "dry": "Dry",
+      "oily": "Oily",
+      "sensitive": "Sensitive"
+    },
+    "hairConcernLabels": {
+      "frizz": "Frizz",
+      "damage": "Damage",
+      "hair_loss": "Hair loss",
+      "dandruff": "Dandruff",
+      "dullness": "Dullness",
+      "split_ends": "Split ends"
+    },
+    "hairGoalLabels": {
+      "hydration": "Hydration",
+      "volume": "Volume",
+      "repair": "Repair",
+      "growth": "Growth",
+      "color_protection": "Colour protection",
+      "anti_frizz": "Anti-frizz"
+    }
   },
   "compatibility": {
     "loading": "Calculating compatibility…",

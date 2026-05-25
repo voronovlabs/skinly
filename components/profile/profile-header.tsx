@@ -1,6 +1,7 @@
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/cn";
 import { Tag } from "@/components/ui";
+import { PremiumUpgradeButton } from "./premium-upgrade-button";
 
 /**
  * ProfileHeader — верх /profile: avatar, имя, email, бейдж плана.
@@ -42,9 +43,12 @@ export function ProfileHeader({ user, className }: ProfileHeaderProps) {
       </div>
       <h2 className="text-h2 text-graphite">{user.name ?? user.email}</h2>
       <p className="text-body-sm text-muted-graphite">{user.email}</p>
-      <Tag tone="active" className="mt-4">
-        {user.plan === "free" ? t("freePlan") : t("proPlan")}
-      </Tag>
+      <div className="mt-4 flex flex-col items-center gap-2">
+        <Tag tone="active">
+          {user.plan === "free" ? t("freePlan") : t("proPlan")}
+        </Tag>
+        {user.plan === "free" && <PremiumUpgradeButton />}
+      </div>
     </header>
   );
 }

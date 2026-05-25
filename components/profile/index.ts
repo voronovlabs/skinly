@@ -12,3 +12,7 @@ export type { SkinProfileCardProps } from "./skin-profile-card";
 export { PreferencesSection } from "./preferences-section";
 
 export { ResetDemoButton } from "./reset-demo-button";
+export { PremiumUpgradeButton } from "./premium-upgrade-button";
+export { ComingSoonButton } from "./coming-soon-button";
+export { HairProfileCard } from "./hair-profile-card";
+export type { HairProfileSummary, HairProfileCardProps } from "./hair-profile-card";

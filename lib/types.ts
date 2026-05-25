@@ -93,6 +93,33 @@ export type SkincareGoal =
   | "even_tone"
   | "minimal_routine";
 
+/* ───────── Профиль волос ───────── */
+
+export type HairType = "straight" | "wavy" | "curly" | "coily";
+export type ScalpType = "normal" | "dry" | "oily" | "sensitive";
+export type HairConcern =
+  | "frizz"
+  | "damage"
+  | "hair_loss"
+  | "dandruff"
+  | "dullness"
+  | "split_ends";
+export type HaircareGoal =
+  | "hydration"
+  | "volume"
+  | "repair"
+  | "growth"
+  | "color_protection"
+  | "anti_frizz";
+
+export interface HairProfile {
+  hairType: HairType;
+  scalpType: ScalpType;
+  concerns: HairConcern[];
+  goal: HaircareGoal;
+  completion: number;
+}
+
 export interface SkinProfile {
   skinType: SkinType;
   sensitivity: SensitivityLevel;
