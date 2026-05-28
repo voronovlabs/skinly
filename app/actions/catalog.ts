@@ -11,8 +11,28 @@ import {
   summaryProfileToEngine,
   type SkinProfileSummaryLike,
 } from "@/lib/compatibility";
+import { prisma } from "@/lib/prisma";
+import { dbProductToDisplay } from "@/lib/db/display";
+import type { Product } from "@/lib/types";
 
 export type { ProductListItem };
+
+/**
+ * Fetch full Product objects by IDs (for guest favorites that live in DB).
+ */
+export async function getProductsByIdsAction(
+  ids: string[],
+): Promise<Product[]> {
+  if (!ids.length) return [];
+  try {
+    const rows = await prisma.product.findMany({
+      where: { id: { in: ids } },
+    });
+    return rows.map(dbProductToDisplay);
+  } catch {
+    return [];
+  }
+}
 
 export async function fetchCatalogPageAction(params: {
   cursor?: string;

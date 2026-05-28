@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { getCurrentSession } from "@/lib/auth";
 import { toggleFavorite } from "@/lib/db/repositories/favorite";
@@ -25,6 +26,7 @@ export async function toggleFavoriteAction(productId: string): Promise<
   }
   try {
     const result = await toggleFavorite(session.userId, productId);
+    revalidatePath("/favorites");
     return { ok: true, persisted: true, isFavorite: result.isFavorite };
   } catch (e) {
     if (
