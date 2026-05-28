@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-
 # =============================================================================
 # Skinly — production multi-stage Dockerfile
 # Использует output: "standalone" для минимального финального образа.
@@ -20,8 +18,10 @@ RUN apk add --no-cache libc6-compat openssl
 WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY prisma ./prisma
-# Если lockfile есть — используем npm ci, иначе fallback на install.
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+RUN npm config set fetch-retries 5 \
+    && npm config set fetch-retry-mintimeout 20000 \
+    && npm config set fetch-retry-maxtimeout 120000 \
+    && if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 
 # --- Stage 2: builder — собираем Next ---

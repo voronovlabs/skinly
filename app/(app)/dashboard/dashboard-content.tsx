@@ -94,7 +94,7 @@ export function DashboardContent({
 
       <SectionHeader
         title={t("recommendations")}
-        actionHref="/favorites"
+        actionHref="/catalog"
         actionLabel={t("seeAll")}
       />
       <div className="flex gap-4 overflow-x-auto px-6 pb-1 no-scrollbar">

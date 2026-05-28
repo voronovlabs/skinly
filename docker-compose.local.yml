@@ -1,0 +1,5 @@
+# Локальный override: публикует postgres на 127.0.0.1:5432 для доступа с хоста (Prisma Studio, psql).
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"

@@ -526,5 +526,35 @@
     "step4Desc": "Set your skin type and preferences: every scan becomes more accurate.",
     "step5Title": "You're all set",
     "step5Desc": "Start with your first scan right now. History and favorites are in the bottom bar."
+  },
+  "catalog": {
+    "metaTitle": "Catalog",
+    "title": "Catalog",
+    "totalProducts": "{count} products",
+    "searchPlaceholder": "Ingredient, brand or name…",
+    "noResults": "Nothing found",
+    "noResultsHint": "Try a different query",
+    "empty": "Catalog is empty",
+    "link": "Product catalog",
+    "allCategories": "All",
+    "showAll": "Show all types",
+    "showLess": "Collapse",
+    "forMe": "Fits me",
+    "categories": {
+      "CLEANSER": "Cleanser",
+      "TONER": "Toner",
+      "ESSENCE": "Essence",
+      "SERUM": "Serum",
+      "MOISTURIZER": "Moisturizer",
+      "EYE_CREAM": "Eye cream",
+      "SUNSCREEN": "SPF",
+      "EXFOLIANT": "Exfoliant",
+      "MASK": "Mask",
+      "MIST": "Mist",
+      "OIL": "Oil",
+      "LIP_CARE": "Lip care",
+      "TREATMENT": "Treatment",
+      "OTHER": "Other"
+    }
   }
 }

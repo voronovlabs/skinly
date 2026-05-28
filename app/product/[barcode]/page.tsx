@@ -121,10 +121,17 @@ export async function generateMetadata({
 
 export default async function ProductAnalysisPage({
   params,
+  searchParams,
 }: {
   params: Promise<Params>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { barcode: idOrBarcode } = await params;
+  const sp = await searchParams;
+  const rawRef = typeof sp.ref === "string" ? sp.ref : undefined;
+  const backHref =
+    rawRef && rawRef.startsWith("/catalog") ? rawRef : "/dashboard";
+
   const t = await getTranslations("product");
   const locale = await getLocale();
 
@@ -139,6 +146,7 @@ export default async function ProductAnalysisPage({
         locale={locale}
         mode={session.mode}
         serverProfile={session.serverProfile}
+        backHref={backHref}
         t={t}
       />
     );
@@ -163,7 +171,7 @@ export default async function ProductAnalysisPage({
         <header className="sticky top-0 z-10 bg-gradient-to-br from-soft-beige to-warm-white px-6 py-6">
           <div className="mb-4 flex items-center justify-between">
             <Link
-              href="/dashboard"
+              href={backHref}
               aria-label={t("back")}
               className="flex h-9 w-9 items-center justify-center rounded-full text-graphite hover:bg-soft-beige"
             >
@@ -239,12 +247,14 @@ async function DbProductView({
   locale,
   mode,
   serverProfile,
+  backHref,
   t,
 }: {
   product: DbProductWithIngredients;
   locale: string;
   mode: "user" | "guest";
   serverProfile: SkinProfileSummaryLike | null;
+  backHref: string;
   t: Awaited<ReturnType<typeof getTranslations<"product">>>;
 }) {
   const isEn = locale === "en";
@@ -275,7 +285,7 @@ async function DbProductView({
       <header className="sticky top-0 z-10 bg-gradient-to-br from-soft-beige to-warm-white px-6 py-6">
         <div className="mb-4 flex items-center justify-between">
           <Link
-            href="/dashboard"
+            href={backHref}
             aria-label={t("back")}
             className="flex h-9 w-9 items-center justify-center rounded-full text-graphite hover:bg-soft-beige"
           >
