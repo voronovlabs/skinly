@@ -1,9 +1,8 @@
-import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
-import { ChevronLeft, MoreVertical } from "lucide-react";
-import { Card, Tag } from "@/components/ui";
+import { MoreVertical } from "lucide-react";
+import { BackButton, Card, Tag } from "@/components/ui";
 import {
   IngredientsList,
   ProductActionBar,
@@ -121,17 +120,10 @@ export async function generateMetadata({
 
 export default async function ProductAnalysisPage({
   params,
-  searchParams,
 }: {
   params: Promise<Params>;
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { barcode: idOrBarcode } = await params;
-  const sp = await searchParams;
-  const rawRef = typeof sp.ref === "string" ? sp.ref : undefined;
-  const backHref =
-    rawRef && rawRef.startsWith("/catalog") ? rawRef : "/dashboard";
-
   const t = await getTranslations("product");
   const locale = await getLocale();
 
@@ -146,7 +138,6 @@ export default async function ProductAnalysisPage({
         locale={locale}
         mode={session.mode}
         serverProfile={session.serverProfile}
-        backHref={backHref}
         t={t}
       />
     );
@@ -170,13 +161,10 @@ export default async function ProductAnalysisPage({
       <main className="relative mx-auto min-h-screen w-full max-w-[480px] bg-warm-white pb-32 animate-fade-in">
         <header className="sticky top-0 z-10 bg-gradient-to-br from-soft-beige to-warm-white px-6 py-6">
           <div className="mb-4 flex items-center justify-between">
-            <Link
-              href={backHref}
-              aria-label={t("back")}
+            <BackButton
+              label={t("back")}
               className="flex h-9 w-9 items-center justify-center rounded-full text-graphite hover:bg-soft-beige"
-            >
-              <ChevronLeft className="h-5 w-5" strokeWidth={2} />
-            </Link>
+            />
             <button
               type="button"
               aria-label={t("menu")}
@@ -247,14 +235,12 @@ async function DbProductView({
   locale,
   mode,
   serverProfile,
-  backHref,
   t,
 }: {
   product: DbProductWithIngredients;
   locale: string;
   mode: "user" | "guest";
   serverProfile: SkinProfileSummaryLike | null;
-  backHref: string;
   t: Awaited<ReturnType<typeof getTranslations<"product">>>;
 }) {
   const isEn = locale === "en";
@@ -284,13 +270,10 @@ async function DbProductView({
     <main className="relative mx-auto min-h-screen w-full max-w-[480px] bg-warm-white pb-32 animate-fade-in">
       <header className="sticky top-0 z-10 bg-gradient-to-br from-soft-beige to-warm-white px-6 py-6">
         <div className="mb-4 flex items-center justify-between">
-          <Link
-            href={backHref}
-            aria-label={t("back")}
+          <BackButton
+            label={t("back")}
             className="flex h-9 w-9 items-center justify-center rounded-full text-graphite hover:bg-soft-beige"
-          >
-            <ChevronLeft className="h-5 w-5" strokeWidth={2} />
-          </Link>
+          />
           <button
             type="button"
             aria-label={t("menu")}

@@ -26,3 +26,5 @@ export type { MatchRingProps } from "./match-ring";
 
 export { LanguageSwitcher } from "./language-switcher";
 export type { LanguageSwitcherProps, AppLocale } from "./language-switcher";
+
+export { BackButton } from "./back-button";
