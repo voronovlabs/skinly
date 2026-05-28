@@ -163,21 +163,25 @@ export function CatalogContent({
                 {t("totalProducts", { count: total.toLocaleString("ru-RU") })}
               </p>
             )}
-            {hasProfile && (
-              <button
-                type="button"
-                onClick={() => setForMe((v) => !v)}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-caption transition-colors",
-                  forMe
-                    ? "bg-lavender-deep text-warm-white"
-                    : "bg-soft-beige text-graphite hover:bg-soft-lavender",
-                )}
-              >
-                <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
-                {t("forMe")}
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => {
+                if (!hasProfile) {
+                  router.push("/onboarding");
+                  return;
+                }
+                setForMe((v) => !v);
+              }}
+              className={cn(
+                "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-caption transition-colors ml-auto",
+                forMe && hasProfile
+                  ? "bg-lavender-deep text-warm-white"
+                  : "bg-soft-beige text-graphite hover:bg-soft-lavender",
+              )}
+            >
+              <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
+              {t("forMe")}
+            </button>
           </div>
           {/* Search */}
           <div className="relative mb-3">
