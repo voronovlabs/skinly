@@ -120,7 +120,7 @@ export async function listProducts({
       emoji: r.emoji,
     };
     if (withIngredients && "ingredients" in r) {
-      base.inciList = (r.ingredients as { position: number; ingredient: { inci: string } }[]).map(
+      base.inciList = (r.ingredients as unknown as { position: number; ingredient: { inci: string } }[]).map(
         (l) => ({ inci: l.ingredient.inci, position: l.position }),
       );
     }

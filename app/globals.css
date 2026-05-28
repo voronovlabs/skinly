@@ -56,8 +56,8 @@
 
   /* === Шрифт === */
   --font-sans:
-    "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue",
-    Arial, sans-serif;
+    var(--font-inter, "Inter"), -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto",
+    "Helvetica Neue", Arial, sans-serif;
 
   /* === Layout === */
   --container-mobile: 480px;

@@ -43,10 +43,9 @@ export function HistoryContent({
     return demoScansToScanRecords(state.history);
   }, [mode, serverScans, state.history]);
 
-  const favoriteIds =
-    mode === "user" ? (serverFavoriteIds ?? []) : state.favoriteIds;
-
   const filtered = useMemo(() => {
+    const favoriteIds =
+      mode === "user" ? (serverFavoriteIds ?? []) : state.favoriteIds;
     const q = query.trim().toLowerCase();
     return records.filter((s) => {
       if (q) {
@@ -66,7 +65,7 @@ export function HistoryContent({
         return false;
       return true;
     });
-  }, [records, query, filter, favoriteIds]);
+  }, [records, query, filter, mode, serverFavoriteIds, state.favoriteIds]);
 
   const grouped = useMemo(() => {
     const map = new Map<HistoryBucket, typeof filtered>();
