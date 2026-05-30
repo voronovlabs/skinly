@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { resolveCategoryForBarcode } from "@/lib/api/national-catalog";
 import { apiError, apiJson, apiPreflight } from "@/lib/api/respond";
 
 /**
@@ -48,12 +49,15 @@ export async function GET(
       return apiError("not_found", "Product not found", 404);
     }
 
+    // Реальная категория — из raw-payload по barcode (как в каталоге).
+    const category = await resolveCategoryForBarcode(product.barcode);
+
     const dto = {
       id: product.id,
       barcode: product.barcode,
       brand: product.brand,
       name: product.name,
-      category: (product.category ?? "OTHER").toLowerCase(),
+      category,
       emoji: product.emoji ?? undefined,
       imageUrl: product.imageUrl ?? undefined,
       description:

@@ -1,12 +1,13 @@
-import { prisma } from "@/lib/prisma";
+import { countNationalCategories } from "@/lib/api/national-catalog";
 import { apiError, apiJson, apiPreflight } from "@/lib/api/respond";
 
 /**
  * GET /api/v1/categories
  *
- * Список категорий товаров с количеством. `value` — ProductCategory enum
- * (UPPERCASE), который клиент передаёт обратно как `category`-фильтр в
- * /api/v1/products. Локализация лейблов — на стороне клиента.
+ * Категории считаются из `NationalCatalogRawProduct.payload.categoryPath[1]`
+ * (связь по barcode) и маппятся в UI-категории (см. lib/api/national-catalog).
+ * `value` — UI-категория, которую клиент передаёт обратно как `category`-фильтр
+ * в /api/v1/products.
  */
 export const dynamic = "force-dynamic";
 
@@ -16,15 +17,7 @@ export function OPTIONS() {
 
 export async function GET() {
   try {
-    const grouped = await prisma.product.groupBy({
-      by: ["category"],
-      _count: { _all: true },
-    });
-
-    const categories = grouped
-      .map((g) => ({ value: g.category as string, count: g._count._all }))
-      .sort((a, b) => b.count - a.count);
-
+    const categories = await countNationalCategories();
     return apiJson({ categories });
   } catch (e) {
     console.error("[api/v1/categories] failed:", e);

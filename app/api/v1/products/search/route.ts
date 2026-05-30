@@ -1,13 +1,12 @@
 import type { NextRequest } from "next/server";
-import { listProducts } from "@/lib/db/repositories/product";
+import { listNationalCatalog } from "@/lib/api/national-catalog";
 import { apiError, apiJson, apiPreflight } from "@/lib/api/respond";
 
 /**
  * GET /api/v1/products/search?q=...
  *
- * Тонкая обёртка над списком — поиск по name/brand/inci. Возвращает тот же
- * page-shape, что и /api/v1/products. Статический сегмент `search` имеет
- * приоритет над динамическим `[id]`, поэтому конфликта нет.
+ * Тонкая обёртка над listNationalCatalog — поиск по name/brand, с категорией
+ * из raw-payload. Статический сегмент `search` приоритетнее `[id]`.
  */
 export const dynamic = "force-dynamic";
 
@@ -26,7 +25,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const page = await listProducts({ q, cursor, category });
+    const page = await listNationalCatalog({ q, cursor, category });
     return apiJson(page);
   } catch (e) {
     console.error("[api/v1/products/search] failed:", e);
