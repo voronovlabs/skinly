@@ -1,14 +1,20 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { resolveCategoryForBarcode } from "@/lib/api/national-catalog";
 import { apiError, apiJson, apiPreflight } from "@/lib/api/respond";
 
 /**
  * GET /api/v1/products/:id
  *
  * `:id` — cuid (Product.id) ИЛИ EAN-barcode. Возвращает «глубокий» товар с
- * составом — shape согласован с mobile `ProductDeepDTO` (lowercase category,
- * lowercase safety, локализованные поля по Accept-Language).
+ * составом для mobile-карточки.
+ *
+ * Изменения относительно предыдущей версии:
+ *   - `category` берётся из `Product.category` напрямую (UPPERCASE enum:
+ *     CLEANSER / TONER / SERUM / … / OTHER). Раньше тут вычислялась RU UI-
+ *     категория из raw-payload (`resolveCategoryForBarcode`) — это давало
+ *     рассинхрон с сайтом и каталогом mobile.
+ *   - `ingredients[].safety` / `flagsAvoided` / `benefitsFor` приводятся к
+ *     lowercase, чтобы совпадать с compatibility-engine'ом и mobile DTO.
  */
 export const dynamic = "force-dynamic";
 
@@ -39,7 +45,10 @@ export async function GET(
 
   try {
     const product =
-      (await prisma.product.findUnique({ where: { id: idOrBarcode }, include })) ??
+      (await prisma.product.findUnique({
+        where: { id: idOrBarcode },
+        include,
+      })) ??
       (await prisma.product.findUnique({
         where: { barcode: idOrBarcode },
         include,
@@ -49,15 +58,14 @@ export async function GET(
       return apiError("not_found", "Product not found", 404);
     }
 
-    // Реальная категория — из raw-payload по barcode (как в каталоге).
-    const category = await resolveCategoryForBarcode(product.barcode);
-
     const dto = {
       id: product.id,
       barcode: product.barcode,
       brand: product.brand,
       name: product.name,
-      category,
+      // UPPERCASE enum значение из БД — тот же формат, что отдаёт
+      // /api/v1/products и использует сайт.
+      category: product.category,
       emoji: product.emoji ?? undefined,
       imageUrl: product.imageUrl ?? undefined,
       description:
