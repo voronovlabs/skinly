@@ -42,33 +42,16 @@ export async function listProducts({
     ? { category: category as import("@prisma/client").ProductCategory }
     : {};
 
+  // NOTE: Ingredient search (via JOIN) was removed — it caused full-table
+  // scans on 40k+ products × ingredient links, making queries time out in
+  // production. Name + brand ILIKE is fast enough without an index for
+  // the current dataset size.
   const searchFilter = trimmed
     ? {
         OR: [
           { name: { contains: trimmed, mode: "insensitive" as const } },
           { brand: { contains: trimmed, mode: "insensitive" as const } },
-          {
-            ingredients: {
-              some: {
-                ingredient: {
-                  OR: [
-                    {
-                      inci: {
-                        contains: trimmed,
-                        mode: "insensitive" as const,
-                      },
-                    },
-                    {
-                      displayNameRu: {
-                        contains: trimmed,
-                        mode: "insensitive" as const,
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-          },
+          { barcode: { contains: trimmed, mode: "insensitive" as const } },
         ],
       }
     : {};
