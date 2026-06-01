@@ -336,10 +336,19 @@ function CatalogCard({ item, backHref }: { item: ProductListItem; backHref: stri
       )}
     >
       <div
-        className="relative mb-2 flex h-[100px] w-full items-center justify-center rounded-lg bg-soft-beige text-[36px]"
+        className="relative mb-2 flex h-[100px] w-full items-center justify-center rounded-lg bg-soft-beige text-[36px] overflow-hidden"
         aria-hidden
       >
-        {item.emoji ?? EMOJI_FALLBACK}
+        {item.imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={item.imageUrl}
+            alt=""
+            className="h-full w-full object-contain"
+          />
+        ) : (
+          item.emoji ?? EMOJI_FALLBACK
+        )}
         {item.score != null && (
           <span
             className={cn(
