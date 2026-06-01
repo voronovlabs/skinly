@@ -9,8 +9,7 @@ export interface ProductListItem {
   name: string;
   category: string;
   emoji: string | null;
-  /** CDN-ссылка на изображение, если есть (используется mobile-каталогом). */
-  imageUrl?: string | null;
+  imageUrl: string | null;
   score?: number | null;
   verdict?: string | null;
   inciList?: { inci: string; position: number }[];
@@ -104,7 +103,7 @@ export async function listProducts({
       name: r.name,
       category: r.category ?? "",
       emoji: r.emoji,
-      imageUrl: r.imageUrl,
+      imageUrl: r.imageUrl ?? null,
     };
     if (withIngredients && "ingredients" in r) {
       base.inciList = (r.ingredients as unknown as { position: number; ingredient: { inci: string } }[]).map(
