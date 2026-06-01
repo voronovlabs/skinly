@@ -131,6 +131,62 @@ function parseComposition(raw: string | null | undefined): string[] {
   return out;
 }
 
+/* ───────── Category detection ───────── */
+
+type ProductCategory =
+  | "CLEANSER" | "TONER" | "ESSENCE" | "SERUM" | "MOISTURIZER"
+  | "EYE_CREAM" | "SUNSCREEN" | "EXFOLIANT" | "MASK" | "MIST"
+  | "OIL" | "LIP_CARE" | "TREATMENT" | "OTHER";
+
+/**
+ * Определяет ProductCategory по данным из национального каталога.
+ * Приоритет: URL slug → хлебные крошки → ключевые слова в названии.
+ */
+function detectCategory(
+  categoryPath: string[],
+  sourceUrl: string,
+  title: string,
+): ProductCategory {
+  const url = sourceUrl.toLowerCase();
+  const crumbs = categoryPath.map((c) => c.toLowerCase()).join(" ");
+  const t = title.toLowerCase();
+  const all = `${url} ${crumbs} ${t}`;
+
+  // ── URL slug (наиболее структурированный сигнал) ──────────────
+  if (/\/syvorotka/.test(url))                          return "SERUM";
+  if (/\/essenciy|\/essentsiy/.test(url))               return "ESSENCE";
+  if (/\/tonik|\/toner/.test(url))                      return "TONER";
+  if (/\/maska/.test(url))                              return "MASK";
+  if (/\/skrab|\/piling/.test(url))                     return "EXFOLIANT";
+  if (/\/solncezashchit|\/spf/.test(url))               return "SUNSCREEN";
+  if (/\/krem-dlya-glaz|\/uhod-za-glazami/.test(url))   return "EYE_CREAM";
+  if (/\/maslo-kosmet|\/maslo-dlya-litsa/.test(url))    return "OIL";
+  if (/\/mist|\/gidrolat/.test(url))                    return "MIST";
+  if (/\/uhod-za-gubami|\/gigiena-gub|\/balzam-dlya-gub/.test(url)) return "LIP_CARE";
+  if (/\/krem(-dlya-litsa|-dlya-tela|-uvlazhn|\/krem\/)/.test(url)) return "MOISTURIZER";
+  if (/\/molochko/.test(url))                           return "MOISTURIZER";
+  if (/\/ochishch|\/gel-dlya-umyv|\/penka|\/mylo|\/micellyarn/.test(url)) return "CLEANSER";
+
+  // ── Хлебные крошки + название (RU ключевые слова) ────────────
+  if (/сыворотк|serum/.test(all))                       return "SERUM";
+  if (/эссенц/.test(all))                               return "ESSENCE";
+  if (/тонер|тоник/.test(all))                          return "TONER";
+  if (/маска для лица|маски для лица/.test(all))        return "MASK";
+  if (/скраб|пилинг|эксфолиант/.test(all))              return "EXFOLIANT";
+  if (/крем для глаз|уход.{0,10}глаз|eye.?cream/.test(all)) return "EYE_CREAM";
+  if (/солнцезащит|\bspf\b/.test(all))                  return "SUNSCREEN";
+  if (/масло.{0,15}(лица|тела|космет)/.test(all))       return "OIL";
+  if (/\bмист\b|спрей.{0,10}лица/.test(all))            return "MIST";
+  if (/уход.{0,10}губ|бальзам.{0,10}губ|блеск.{0,10}губ|помада/.test(all)) return "LIP_CARE";
+  if (/крем.{0,15}(лица|увлажн|питат)|увлажняющий крем|moisturiz/.test(all)) return "MOISTURIZER";
+  if (/очищ|умыв|мицеллярн|micellar|cleansing|cleanser/.test(all)) return "CLEANSER";
+  if (/маска/.test(all))                                return "MASK";
+  if (/масло/.test(all))                                return "OIL";
+  if (/\bкрем\b/.test(all))                             return "MOISTURIZER";
+
+  return "OTHER";
+}
+
 /* ───────── Process one raw row ───────── */
 
 interface RawRow {
@@ -159,6 +215,11 @@ async function processOne(raw: RawRow, stats: Stats): Promise<void> {
 
   const brand = (payload?.brand ?? "").trim() || "Unknown";
   const imageUrl = (payload?.imageUrl ?? "").trim() || null;
+  const category = detectCategory(
+    payload?.categoryPath ?? [],
+    raw.sourceUrl,
+    titleRaw,
+  );
 
   // ── Product upsert (key = barcode) ──────────────────────
   const product = await prisma.product.upsert({
@@ -167,6 +228,7 @@ async function processOne(raw: RawRow, stats: Stats): Promise<void> {
       barcode: raw.barcode,
       brand,
       name: titleRaw,
+      category,
       imageUrl,
       source: "national_catalog",
       externalId: raw.id,
@@ -174,6 +236,7 @@ async function processOne(raw: RawRow, stats: Stats): Promise<void> {
     update: {
       brand,
       name: titleRaw,
+      category,
       imageUrl,
       source: "national_catalog",
       externalId: raw.id,
