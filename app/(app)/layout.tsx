@@ -7,7 +7,7 @@ import { TutorialOverlay } from "@/components/tutorial";
 import { useTutorial } from "@/lib/tutorial/use-tutorial";
 
 function tabFromPath(pathname: string): BottomNavTab {
-  if (pathname.startsWith("/history")) return "history";
+  if (pathname.startsWith("/catalog")) return "catalog";
   if (pathname.startsWith("/favorites")) return "favorites";
   if (pathname.startsWith("/profile")) return "profile";
   return "dashboard";

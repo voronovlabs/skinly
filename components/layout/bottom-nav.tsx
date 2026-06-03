@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { Clock, Heart, Home, ScanLine, User, type LucideIcon } from "lucide-react";
+import { Heart, Home, LayoutGrid, ScanLine, User, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 /**
@@ -14,7 +14,7 @@ import { cn } from "@/lib/cn";
  * Phase 3: лейблы вкладок берутся из messages/*.json (`nav.*`).
  */
 
-export type BottomNavTab = "dashboard" | "history" | "favorites" | "profile";
+export type BottomNavTab = "dashboard" | "catalog" | "favorites" | "profile";
 
 export interface BottomNavProps {
   active: BottomNavTab;
@@ -26,12 +26,12 @@ interface NavLinkConfig {
   href: string;
   Icon: LucideIcon;
   /** Ключ перевода в namespace `nav`. */
-  i18nKey: "home" | "history" | "favorites" | "profile";
+  i18nKey: "home" | "catalog" | "favorites" | "profile";
 }
 
 const LEFT_LINKS: ReadonlyArray<NavLinkConfig> = [
   { tab: "dashboard", href: "/dashboard", Icon: Home, i18nKey: "home" },
-  { tab: "history", href: "/history", Icon: Clock, i18nKey: "history" },
+  { tab: "catalog", href: "/catalog", Icon: LayoutGrid, i18nKey: "catalog" },
 ];
 
 const RIGHT_LINKS: ReadonlyArray<NavLinkConfig> = [
