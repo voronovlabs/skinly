@@ -132,7 +132,7 @@ export function OnboardingWizard({
   };
 
   const persistAndExit = (target: string) => {
-    const profile = answersToSkinProfile(answers, visibleQuestions.length);
+    const profile = answersToSkinProfile(answers);
     // 1. Optimistic — demo store (всегда, и для user, и для guest).
     setSkinProfile(profile);
 
@@ -293,10 +293,7 @@ export function OnboardingWizard({
  * goal: первый приоритетный из goals
  * completion: по 6 core вопросам (skinBehavior, breakouts, skinReaction, pores, goals, special)
  */
-function answersToSkinProfile(
-  answers: Answers,
-  _totalVisible: number,
-): DemoSkinProfile {
+function answersToSkinProfile(answers: Answers): DemoSkinProfile {
   // ── skinType ──────────────────────────────────────────────────────────────
   const skinBehaviorMap: Record<string, SkinType> = {
     normal: "normal",
