@@ -157,58 +157,89 @@
       "ctaGuest": "Continue as guest"
     },
     "questions": {
-      "skinType": {
-        "title": "What's your skin type?",
-        "subtitle": "Select the one that describes your skin most of the time",
+      "age": {
+        "title": "How old are you?",
+        "subtitle": "This helps us recommend the right care",
         "options": {
-          "dry": "Dry",
-          "oily": "Oily",
-          "combination": "Combination",
-          "normal": "Normal"
+          "under22": "Under 22",
+          "y23_29": "23–29",
+          "y30_39": "30–39",
+          "y40plus": "40+"
         }
       },
-      "sensitivity": {
-        "title": "How sensitive is your skin?",
-        "subtitle": "How does it react to new products?",
+      "gender": {
+        "title": "Your gender",
+        "subtitle": "",
         "options": {
-          "none": "Not sensitive",
-          "mild": "Mildly sensitive",
-          "high": "Very sensitive",
-          "reactive": "Reactive"
+          "female": "Female",
+          "male": "Male"
         }
       },
-      "concerns": {
-        "title": "What are your main concerns?",
-        "subtitle": "Select all that apply",
+      "pregnant": {
+        "title": "Are you currently pregnant or breastfeeding?",
+        "subtitle": "This is important for choosing safe ingredients",
         "options": {
-          "acne": "Acne",
-          "aging": "Aging",
-          "pigmentation": "Dark spots",
-          "redness": "Redness",
-          "pores": "Pores",
-          "blackheads": "Blackheads"
+          "no": "No",
+          "yes": "Yes"
         }
       },
-      "avoided": {
-        "title": "Any ingredients to avoid?",
-        "subtitle": "We'll flag them in analysis",
+      "skinBehavior": {
+        "title": "How does your skin feel throughout the day?",
+        "subtitle": "Describe what you notice most often",
         "options": {
-          "fragrance": "Fragrance",
-          "alcohol": "Alcohol",
-          "sulfates": "Sulfates",
-          "parabens": "Parabens",
-          "essential_oils": "Essential oils"
+          "normal": "Comfortable — neither shiny nor tight",
+          "combination": "Shiny in the T-zone (forehead, nose, chin), cheeks feel normal",
+          "oily": "Shiny all over by midday",
+          "dry": "I feel tightness or flaking"
         }
       },
-      "goal": {
-        "title": "Your main skincare goal?",
-        "subtitle": "What matters most to you?",
+      "breakouts": {
+        "title": "Do you get breakouts?",
+        "subtitle": "",
         "options": {
-          "clear_skin": "Clear skin",
-          "anti_aging": "Anti-aging",
-          "hydration": "Hydration",
-          "even_tone": "Even tone",
-          "minimal_routine": "Minimal routine"
+          "none": "No — skin is clear and calm",
+          "occasional": "Occasional blemishes",
+          "frequent": "Frequently, face is rarely completely clear"
+        }
+      },
+      "skinReaction": {
+        "title": "How does your skin react to temperature, wind, or cosmetics?",
+        "subtitle": "",
+        "options": {
+          "calm": "Not at all — skin stays calm",
+          "mild": "Sometimes flushes but settles quickly",
+          "couperose": "Persistent redness or visible broken capillaries (couperose)",
+          "rosacea": "Constant redness, burning, very reactive skin"
+        }
+      },
+      "pores": {
+        "title": "Do you have enlarged pores or blackheads?",
+        "subtitle": "",
+        "options": {
+          "none": "No, pores are barely visible",
+          "tzone": "In the T-zone",
+          "allover": "All over my face"
+        }
+      },
+      "goals": {
+        "title": "What would you like to improve or add to your routine?",
+        "subtitle": "Choose up to 3 options",
+        "options": {
+          "even_tone": "Even out skin tone and reduce dark spots",
+          "anti_aging": "Improve firmness and smooth fine lines",
+          "eye_care": "Refresh tired eyes and reduce puffiness",
+          "calm_skin": "Calm skin and reduce redness",
+          "hydration": "Hydrate and restore the skin barrier",
+          "basic": "I just want a well-considered basic routine"
+        }
+      },
+      "special": {
+        "title": "Any special considerations?",
+        "subtitle": "Tell us what's important for us to know",
+        "options": {
+          "allergy": "I've had a reaction to cosmetics or an ingredient allergy",
+          "retinoid": "I'm actively using retinol or retinoids",
+          "nothing": "None of the above"
         }
       }
     }

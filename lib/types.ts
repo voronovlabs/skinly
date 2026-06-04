@@ -163,4 +163,12 @@ export interface OnboardingQuestionDef {
   id: string;
   kind: OnboardingAnswerKind;
   options: OnboardingOptionDef[];
+  /** multi: максимальное количество выборов. */
+  maxSelect?: number;
+  /** "grid" — 2-col с эмодзи (по умолчанию), "list" — полная ширина с текстом. */
+  layout?: "grid" | "list";
+  /** Скрыть вопрос, если другой вопрос имеет одно из указанных значений. */
+  skipIf?: { questionId: string; values: string[] };
+  /** Выбор этой опции снимает все остальные (и наоборот). */
+  exclusiveOptionId?: string;
 }
