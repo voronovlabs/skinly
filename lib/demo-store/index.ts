@@ -13,7 +13,6 @@ export {
 export type {
   DemoState,
   DemoSkinProfile,
-  DemoHairProfile,
   DemoScan,
   DemoAction,
 } from "./types";

@@ -11,7 +11,6 @@ export const DEMO_STATE_VERSION = 1;
 export const EMPTY_DEMO_STATE: DemoState = {
   version: DEMO_STATE_VERSION,
   skinProfile: null,
-  hairProfile: null,
   favoriteIds: [],
   history: [],
   compareIds: [],
@@ -30,7 +29,6 @@ export function readDemoState(): DemoState {
     return {
       version: DEMO_STATE_VERSION,
       skinProfile: parsed.skinProfile ?? null,
-      hairProfile: parsed.hairProfile ?? null,
       favoriteIds: Array.isArray(parsed.favoriteIds) ? parsed.favoriteIds : [],
       history: Array.isArray(parsed.history) ? parsed.history : [],
       compareIds: Array.isArray(parsed.compareIds) ? parsed.compareIds : [],

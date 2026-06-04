@@ -14,7 +14,7 @@ export default async function OnboardingPage() {
     <ScreenContainer>
       <OnboardingWizard
         questions={ONBOARDING_QUESTIONS}
-        finishHref="/hair-onboarding"
+        finishHref="/onboarding/complete"
         exitHref="/welcome"
       />
     </ScreenContainer>

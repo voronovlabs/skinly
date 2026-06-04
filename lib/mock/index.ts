@@ -13,4 +13,3 @@ export {
 export { MOCK_USER } from "./profile";
 
 export { ONBOARDING_QUESTIONS } from "./onboarding-questions";
-export { HAIR_ONBOARDING_QUESTIONS } from "./hair-questions";

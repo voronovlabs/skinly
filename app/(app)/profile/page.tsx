@@ -5,19 +5,16 @@ import { Button, buttonClassName } from "@/components/ui";
 import { ScreenContainer } from "@/components/layout";
 import {
   ComingSoonButton,
-  HairProfileCard,
   PreferencesSection,
   ProfileHeader,
   ResetDemoButton,
   SkinProfileCard,
   StatsRow,
 } from "@/components/profile";
-import type { HairProfileSummary } from "@/components/profile";
 import { LogoutButton } from "@/components/auth";
 import { MOCK_USER } from "@/lib/mock";
 import { getCurrentUser } from "@/lib/auth";
 import { getBeautyProfileByUserId } from "@/lib/db/repositories/beauty-profile";
-import { getHairProfileByUserId } from "@/lib/db/repositories/hair-profile";
 import {
   averageMatchScoreByUser,
   countDistinctProductsByUser,
@@ -34,12 +31,11 @@ export default async function ProfilePage() {
   const t = await getTranslations("profile");
   const dbUser = await getCurrentUser();
 
-  // Профиль шапки — DB User или mock (для guest)
   const headerUser = dbUser
     ? {
         name: dbUser.name,
         email: dbUser.email,
-        avatarEmoji: MOCK_USER.avatarEmoji, // emoji-аватар пока не храним
+        avatarEmoji: MOCK_USER.avatarEmoji,
         plan: "free" as const,
       }
     : {
@@ -49,17 +45,14 @@ export default async function ProfilePage() {
         plan: MOCK_USER.plan,
       };
 
-  // Server-side: BeautyProfile + HairProfile + stats для user; null/undefined — guest fallback
   let skinProfile: SkinProfileSummary | null | undefined = undefined;
-  let hairProfile: HairProfileSummary | null | undefined = undefined;
   let stats: { scans: number; products: number; avgMatch: number } | undefined =
     undefined;
 
   if (dbUser) {
     try {
-      const [bp, hp, scans, products, avgMatch] = await Promise.all([
+      const [bp, scans, products, avgMatch] = await Promise.all([
         getBeautyProfileByUserId(dbUser.id),
-        getHairProfileByUserId(dbUser.id),
         countScansByUser(dbUser.id),
         countDistinctProductsByUser(dbUser.id),
         averageMatchScoreByUser(dbUser.id),
@@ -76,20 +69,9 @@ export default async function ProfilePage() {
           }
         : null;
 
-      hairProfile = hp
-        ? {
-            hairType: hp.hairType.toLowerCase(),
-            scalpType: hp.scalpType.toLowerCase(),
-            concerns: hp.concerns.map((c) => c.toLowerCase()),
-            goal: hp.goal.toLowerCase(),
-            completion: hp.completion,
-          }
-        : null;
-
       stats = { scans, products, avgMatch };
     } catch (e) {
       console.error("[profile/page] DB load failed:", e);
-      // skinProfile/hairProfile/stats остаются undefined → клиент возьмёт demo store
     }
   }
 
@@ -97,7 +79,7 @@ export default async function ProfilePage() {
     <ScreenContainer withBottomNav>
       <ProfileHeader user={headerUser} />
 
-      {/* Skin profile (server-data для user, demo store для guest) */}
+      {/* Skin profile */}
       <section className="border-b border-soft-beige px-6 py-6">
         <h3 className="text-h3 text-graphite mb-3">{t("skinProfileTitle")}</h3>
         <SkinProfileCard profile={skinProfile} className="mb-3" />
@@ -106,18 +88,6 @@ export default async function ProfilePage() {
           className={buttonClassName({ variant: "secondary" })}
         >
           {t("editSkinProfile")}
-        </Link>
-      </section>
-
-      {/* Hair profile */}
-      <section className="border-b border-soft-beige px-6 py-6">
-        <h3 className="text-h3 text-graphite mb-3">{t("hairProfileTitle")}</h3>
-        <HairProfileCard profile={hairProfile} className="mb-3" />
-        <Link
-          href="/hair-onboarding"
-          className={buttonClassName({ variant: "secondary" })}
-        >
-          {t("editHairProfile")}
         </Link>
       </section>
 
@@ -133,7 +103,7 @@ export default async function ProfilePage() {
         <PreferencesSection />
       </section>
 
-      {/* Demo controls (полезно и для user'а — стереть локальный кэш) */}
+      {/* Demo controls */}
       <section className="border-b border-soft-beige px-6 py-6 space-y-3">
         <h3 className="text-h3 text-graphite">{t("demoSection")}</h3>
         <p className="text-body-sm text-muted-graphite">
