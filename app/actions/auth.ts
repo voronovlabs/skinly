@@ -13,41 +13,19 @@
  */
 
 import { redirect } from "next/navigation";
-import { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
 import {
   clearSessionCookie,
   getCurrentSession,
-  hashPassword,
   setSessionCookie,
-  verifyPassword,
 } from "@/lib/auth";
+import { authenticateUser, registerUser } from "@/lib/services/auth-service";
 import type { AuthFormState } from "@/lib/auth/forms";
 
 /* ───────── Private helpers (НЕ экспортируем) ───────── */
 
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PASSWORD_MIN_LEN = 8;
-
-function isValidEmail(value: string): boolean {
-  return EMAIL_REGEX.test(value) && value.length <= 254;
-}
-
 function readField(formData: FormData, key: string): string {
   const v = formData.get(key);
   return typeof v === "string" ? v.trim() : "";
-}
-
-function isPrismaConnectionError(e: unknown): boolean {
-  if (e instanceof Prisma.PrismaClientInitializationError) return true;
-  if (e instanceof Prisma.PrismaClientRustPanicError) return true;
-  if (
-    e instanceof Prisma.PrismaClientKnownRequestError &&
-    (e.code === "P1001" || e.code === "P1002" || e.code === "P1017")
-  ) {
-    return true;
-  }
-  return false;
 }
 
 async function ensureSession(): Promise<void> {
@@ -67,29 +45,11 @@ export async function registerAction(
   const password = readField(formData, "password");
   const name = readField(formData, "name") || null;
 
-  if (!isValidEmail(email) || password.length < PASSWORD_MIN_LEN) {
-    return { error: "validation", email, name: name ?? "" };
+  const result = await registerUser({ email, password, name });
+  if (!result.ok) {
+    return { error: result.error, email, name: name ?? "" };
   }
-
-  let user;
-  try {
-    const passwordHash = await hashPassword(password);
-    user = await prisma.user.create({
-      data: { email, passwordHash, name },
-    });
-  } catch (e) {
-    if (
-      e instanceof Prisma.PrismaClientKnownRequestError &&
-      e.code === "P2002"
-    ) {
-      return { error: "email_taken", email, name: name ?? "" };
-    }
-    if (isPrismaConnectionError(e)) {
-      return { error: "db_unavailable", email, name: name ?? "" };
-    }
-    console.error("[auth/register] unexpected error:", e);
-    return { error: "unknown", email, name: name ?? "" };
-  }
+  const user = result.user;
 
   await setSessionCookie({
     type: "user",
@@ -117,25 +77,11 @@ export async function loginAction(
   const email = readField(formData, "email").toLowerCase();
   const password = readField(formData, "password");
 
-  if (!isValidEmail(email) || password.length === 0) {
-    return { error: "validation", email };
+  const result = await authenticateUser({ email, password });
+  if (!result.ok) {
+    return { error: result.error, email };
   }
-
-  let user;
-  try {
-    user = await prisma.user.findUnique({ where: { email } });
-  } catch (e) {
-    if (isPrismaConnectionError(e)) {
-      return { error: "db_unavailable", email };
-    }
-    console.error("[auth/login] unexpected error:", e);
-    return { error: "unknown", email };
-  }
-
-  if (!user) return { error: "invalid_credentials", email };
-
-  const ok = await verifyPassword(password, user.passwordHash);
-  if (!ok) return { error: "invalid_credentials", email };
+  const user = result.user;
 
   await setSessionCookie({
     type: "user",
