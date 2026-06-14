@@ -46,29 +46,51 @@ BEGIN
   RETURN ((10 - (s % 10)) % 10) = substr(code, n, 1)::int;
 END $$;
 
--- ── мусорный ли бренд (юрлицо / Unknown / число / слишком длинный) ──────────
+-- ── мусорный ли бренд ───────────────────────────────────────────────────────
+-- Мусор = пусто / unknown / только цифры / юрлицо / аномально длинный, ЛИБО
+-- «строка состоит ТОЛЬКО из слов-плейсхолдеров отсутствия бренда».
+--
+-- Последнее — ключевое: сначала приводим к «голому» виду (lower, ё→е, любой
+-- не-буквенно-цифровой символ → пробел, схлопывание). Кавычки/точки/подчёрки/
+-- склейки пропадают:
+--   '". нет товарного знака"'            → 'нет товарного знака'
+--   '"\" отсутствует \" нет тов. знака"' → 'отсутствует нет товарного знака'
+-- Затем проверяем, что ВСЯ строка — это последовательность слов из словаря
+-- «нет бренда» (anchored ^…$). Поэтому реальные бренды не страдают: в
+-- 'golden rose' / 'l oreal paris' / '20milli' / '1 all systems' /
+-- 'zielinski rozen' есть токены вне словаря → полного совпадения нет.
 CREATE OR REPLACE FUNCTION dm.is_garbage_brand(s text)
 RETURNS boolean LANGUAGE sql IMMUTABLE AS $$
+  WITH v AS (
+    SELECT dm.norm_ws(
+      regexp_replace(translate(lower(coalesce(s,'')), 'ё', 'е'),
+                     '[^a-zа-я0-9 ]+', ' ', 'g')
+    ) AS t
+  ),
+  w AS (   -- один токен «словаря отсутствия бренда» (PG regex без рекурсии)
+    SELECT '(без|нет|не|товарн(ый|ого|ым)|знак(а|ом)?|бренд(а|ом)?|марк[аи]|'
+        || 'отсутству(ет|ют)|пуст(ой|ого|ая|ым)|указан[оаы]?|данных)' AS pat
+  )
   SELECT
-    s IS NULL
-    OR dm.norm_ws(s) IS NULL
-    OR dm.norm_ws(s) ILIKE 'unknown'
-    OR dm.norm_ws(s) ~ '^\s*\d+\s*$'                              -- только цифры
-    OR dm.norm_ws(s) ~* '^(ооо|оао|зао|пао|ип|ао|тоо|чп)\M'       -- юрлицо
-    OR length(dm.norm_ws(s)) > 50;
+    t IS NULL                                                    -- пусто / только символы
+    OR t = 'unknown'
+    OR t ~ '^\d+$'                                               -- только цифры
+    OR t ~ '^(ооо|оао|зао|пао|ип|ао|тоо|чп)( |$)'                -- юрлицо
+    OR length(t) > 50                                            -- аномально длинный
+    -- вся строка = только слова-плейсхолдеры отсутствия бренда (^W( W)*$):
+    OR t ~ ('^' || pat || '( ' || pat || ')*$')
+  FROM v, w;
 $$;
 
 -- ── нормализованный бренд: чистый бренд или NULL (если мусор) ───────────────
+-- ВАЖНО: апостроф (') и амперсанд (&) НЕ удаляем — иначе ломаются реальные
+-- бренды «L'Oreal Paris», «Zielinski & Rozen». Снимаем только ™®© и «ёлочки»/
+-- прямые двойные кавычки-обёртки.
 CREATE OR REPLACE FUNCTION dm.norm_brand(s text)
 RETURNS text LANGUAGE sql IMMUTABLE AS $$
   SELECT CASE
     WHEN dm.is_garbage_brand(s) THEN NULL
-    ELSE dm.norm_ws(
-      regexp_replace(            -- снять ™®© « » " ' и обрамляющие кавычки
-        regexp_replace(coalesce(s,''), '[™®©«»"'']', ' ', 'g'),
-        '\s+', ' ', 'g'
-      )
-    )
+    ELSE dm.norm_ws(regexp_replace(coalesce(s,''), '[™®©«»"]+', ' ', 'g'))
   END;
 $$;
 
@@ -172,3 +194,43 @@ RETURNS int LANGUAGE sql IMMUTABLE AS $$
     + (CASE WHEN category IS NOT NULL AND category <> 'Прочее' THEN 5 ELSE 0 END)
   ));
 $$;
+
+-- =============================================================================
+-- SMOKE: самопроверка нормализации бренда (выполняется при apply файла).
+-- Падает с ошибкой, если правило сломано. Чисто для валидации, ничего не пишет.
+-- =============================================================================
+DO $smoke$
+BEGIN
+  -- 1–6: плейсхолдеры «нет бренда» → NULL (в т.ч. в кавычках/точках/склейках)
+  ASSERT dm.norm_brand('Без товарного знака') IS NULL;
+  ASSERT dm.norm_brand('без товарного знака') IS NULL;
+  ASSERT dm.norm_brand('БЕЗ ТОВАРНОГО ЗНАКА') IS NULL;
+  ASSERT dm.norm_brand('нет товарного знака') IS NULL;
+  ASSERT dm.norm_brand('Нет товарного знака') IS NULL;
+  ASSERT dm.norm_brand('Отсутствует') IS NULL;
+  ASSERT dm.norm_brand('отсутствует') IS NULL;
+  ASSERT dm.norm_brand('Нет') IS NULL;
+  ASSERT dm.norm_brand('нет') IS NULL;
+  ASSERT dm.norm_brand('Без бренда') IS NULL;
+  ASSERT dm.norm_brand('пустой бренд') IS NULL;
+  ASSERT dm.norm_brand('. нет товарного знака') IS NULL;
+  ASSERT dm.norm_brand('_ без товарного знака') IS NULL;
+  ASSERT dm.norm_brand('" отсутствует " нет товарного знака') IS NULL;
+  ASSERT dm.norm_brand('''  Нет товарного знака "') IS NULL;
+
+  -- 7: реальные бренды НЕ ломаются
+  ASSERT dm.norm_brand('Golden Rose')      = 'Golden Rose';
+  ASSERT dm.norm_brand('L''Oreal Paris')   = 'L''Oreal Paris';   -- апостроф сохранён
+  ASSERT dm.norm_brand('20milli')          = '20milli';
+  ASSERT dm.norm_brand('1 All Systems')    = '1 All Systems';
+  ASSERT dm.norm_brand('Zielinski & Rozen')= 'Zielinski & Rozen'; -- амперсанд сохранён
+
+  RAISE NOTICE 'dm.norm_brand smoke: OK';
+END
+$smoke$;
+
+-- Быстрая ручная проверка (ожидаемые значения справа):
+--   SELECT dm.norm_brand('Без товарного знака') IS NULL;     -- t
+--   SELECT dm.norm_brand('Golden Rose') = 'Golden Rose';     -- t
+--   SELECT dm.norm_brand('Zielinski & Rozen');               -- Zielinski & Rozen
+--   SELECT dm.norm_brand('L''Oreal Paris');                  -- L'Oreal Paris
