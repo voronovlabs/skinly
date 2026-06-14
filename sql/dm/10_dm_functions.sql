@@ -82,16 +82,49 @@ RETURNS boolean LANGUAGE sql IMMUTABLE AS $$
   FROM v, w;
 $$;
 
--- ── нормализованный бренд: чистый бренд или NULL (если мусор) ───────────────
--- ВАЖНО: апостроф (') и амперсанд (&) НЕ удаляем — иначе ломаются реальные
--- бренды «L'Oreal Paris», «Zielinski & Rozen». Снимаем только ™®© и «ёлочки»/
--- прямые двойные кавычки-обёртки.
+-- ── нормализованный бренд: чистый бренд (канонический регистр) или NULL ──────
+-- Шаги:
+--   1) мусор → NULL (dm.is_garbage_brand);
+--   2) снять ™®© и «ёлочки»/прямые двойные кавычки-обёртки (апостроф ' и
+--      амперсанд & сохраняем — нужны для «L'Oreal Paris», «Zielinski & Rozen»);
+--   3) КАНОНИЗАЦИЯ РЕГИСТРА — чтобы «Dream republic» и «Dream Republic», «CONCEPT»
+--      и «Concept», «LATTAFA» и «Lattafa» схлопывались в одно значение:
+--        • известные бренды со спец-регистром (acronym-style) — из словаря
+--          исключений (ключ = lower, только буквы/цифры): BBOne, JM Solution,
+--          VT Cosmetics, TNL Professional, L'Oreal Paris …;
+--        • всё остальное → initcap ("GOLDWELL"→"Goldwell",
+--          "selective professional"→"Selective Professional",
+--          "20milli"→"20milli", "1 All Systems"→"1 All Systems").
+--
+-- Расширять читаемость новых брендов = добавить строку в VALUES `ex`.
 CREATE OR REPLACE FUNCTION dm.norm_brand(s text)
 RETURNS text LANGUAGE sql IMMUTABLE AS $$
+  WITH base AS (
+    SELECT CASE
+      WHEN dm.is_garbage_brand(s) THEN NULL
+      ELSE dm.norm_ws(regexp_replace(coalesce(s,''), '[™®©«»"]+', ' ', 'g'))
+    END AS cleaned
+  ),
+  k AS (
+    SELECT cleaned,
+      regexp_replace(lower(translate(coalesce(cleaned,''), 'ё', 'е')),
+                     '[^a-z0-9]+', '', 'g') AS key
+    FROM base
+  ),
+  ex(key, canon) AS (
+    VALUES
+      ('bbone',           'BBOne'),
+      ('jmsolution',      'JM Solution'),       -- JM Solution / JM SOLUTION / JMSolution
+      ('vtcosmetics',     'VT Cosmetics'),
+      ('tnlprofessional', 'TNL Professional'),
+      ('lorealparis',     'L''Oreal Paris')
+      -- ← сюда добавлять новые бренды со спец-регистром
+  )
   SELECT CASE
-    WHEN dm.is_garbage_brand(s) THEN NULL
-    ELSE dm.norm_ws(regexp_replace(coalesce(s,''), '[™®©«»"]+', ' ', 'g'))
-  END;
+    WHEN k.cleaned IS NULL THEN NULL
+    ELSE coalesce(ex.canon, initcap(k.cleaned))
+  END
+  FROM k LEFT JOIN ex ON ex.key = k.key;
 $$;
 
 -- ── ключ дедупликации бренда (lowercase, без знаков) ────────────────────────
@@ -221,16 +254,38 @@ BEGIN
   -- 7: реальные бренды НЕ ломаются
   ASSERT dm.norm_brand('Golden Rose')      = 'Golden Rose';
   ASSERT dm.norm_brand('L''Oreal Paris')   = 'L''Oreal Paris';   -- апостроф сохранён
-  ASSERT dm.norm_brand('20milli')          = '20milli';
+  ASSERT dm.norm_brand('20milli')          = '20milli';          -- цифры не ломаем
   ASSERT dm.norm_brand('1 All Systems')    = '1 All Systems';
   ASSERT dm.norm_brand('Zielinski & Rozen')= 'Zielinski & Rozen'; -- амперсанд сохранён
+
+  -- 8: канонизация регистра — варианты схлопываются
+  ASSERT dm.norm_brand('Dream republic') = dm.norm_brand('Dream Republic');
+  ASSERT dm.norm_brand('CONCEPT')        = dm.norm_brand('Concept');
+  ASSERT dm.norm_brand('AVON')           = dm.norm_brand('Avon');
+  ASSERT dm.norm_brand('LATTAFA')        = dm.norm_brand('Lattafa');
+  ASSERT dm.norm_brand('DIKSON')         = dm.norm_brand('Dikson');
+  ASSERT dm.norm_brand('GOLDWELL')       = 'Goldwell';
+  ASSERT dm.norm_brand('SELECTIVE PROFESSIONAL') = 'Selective Professional';
+  -- известные бренды со спец-регистром (acronym-style) и схлопывание вариантов
+  ASSERT dm.norm_brand('bbone')      = 'BBOne';
+  ASSERT dm.norm_brand('BBOne')      = 'BBOne';
+  ASSERT dm.norm_brand('JM SOLUTION')= 'JM Solution';
+  ASSERT dm.norm_brand('JMSolution') = 'JM Solution';
+  ASSERT dm.norm_brand('vt cosmetics') = 'VT Cosmetics';
+  ASSERT dm.norm_brand('TNL professional') = 'TNL Professional';
 
   RAISE NOTICE 'dm.norm_brand smoke: OK';
 END
 $smoke$;
 
 -- Быстрая ручная проверка (ожидаемые значения справа):
---   SELECT dm.norm_brand('Без товарного знака') IS NULL;     -- t
---   SELECT dm.norm_brand('Golden Rose') = 'Golden Rose';     -- t
---   SELECT dm.norm_brand('Zielinski & Rozen');               -- Zielinski & Rozen
---   SELECT dm.norm_brand('L''Oreal Paris');                  -- L'Oreal Paris
+--   SELECT dm.norm_brand('Без товарного знака') IS NULL;                  -- t
+--   SELECT dm.norm_brand('Dream republic') = dm.norm_brand('Dream Republic'); -- t
+--   SELECT dm.norm_brand('CONCEPT') = dm.norm_brand('Concept');           -- t
+--   SELECT dm.norm_brand('L''Oreal Paris');                               -- L'Oreal Paris
+--   SELECT dm.norm_brand('GOLDWELL');                                     -- Goldwell
+--   SELECT dm.norm_brand('20milli');                                      -- 20milli
+--
+-- После применения этого файла ПЕРЕСОЗДАТЬ материализацию:
+--   psql "$DATABASE_URL" -f sql/dm/20_dm_products.sql
+--   (или: SELECT dm.refresh_dm_products();  если структура MV не менялась)
