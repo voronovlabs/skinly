@@ -108,8 +108,6 @@ export interface BarcodeCandidate {
   score?: number;
 }
 
-const EAN_RE = /^\d{8}$|^\d{12}$|^\d{13}$|^\d{14}$/;
-const DIGITS_8_14_RE = /\b(\d{8,14})\b/;
 // NB: JS \b не работает вокруг кириллицы (\w = ASCII), поэтому матчим
 // единицу как самостоятельную ячейку без \b.
 const UNIT_CELL_RE = /^(шт|уп|упак|упаковка|кг|г|гр|мл|л|пар|set|компл|комплект|штук)\.?$/i;
@@ -138,17 +136,99 @@ export function isValidEan(code: string): boolean {
 }
 
 /**
- * Распарсить таблицу результатов barcode-list.ru.
- *
- * Толерантно: сканируем все строки таблиц, в каждой ищем ячейку-штрихкод
- * (8–14 цифр), а из остальных ячеек эвристически берём name / unit / rating.
- * Это устойчиво к перестановке колонок и кастомной вёрстке. Строки без
- * штрихкода (шапки, «случайные товары» без EAN) отбрасываются.
- *
- * Дедуп по barcode. Возвращаем в порядке появления.
+ * Слова-«хром» страницы/шапки таблицы, которые НЕ должны попадать в name.
  */
-export function parseSearchResults(html: string): BarcodeCandidate[] {
-  const $ = cheerio.load(html);
+const CHROME_TOKEN_RE =
+  /Поиск\s*:|Единица\s+измерения|Наименование|Штрих[\s-]?код|Рейтинг|№/gi;
+
+/** Вырезает футноут «* Рейтинг …» и слова-шапку из сегмента названия. */
+function cleanChrome(seg: string): string {
+  let s = seg.replace(/ /g, " ");
+  // Футноут после таблицы: «* Рейтинг — это …» — отрезаем по маркеру.
+  s = s.split(/\*\s*Рейтинг/i)[0];
+  s = s.replace(CHROME_TOKEN_RE, " ");
+  // Остаточные одиночные звёздочки.
+  s = s.replace(/(^|\s)\*+(\s|$)/g, " ");
+  return s.replace(/\s+/g, " ").trim();
+}
+
+const TRAILING_INT_RE = /^\d{1,5}$/;
+const NUMBER_RE = /^\d+(?:[.,]\d+)?$/;
+
+/**
+ * Из «хвоста» сегмента (после очистки от хрома) отделяет name / unit / rating.
+ *
+ * Порядок колонок barcode-list.ru: [№] Штрих-код Наименование Ед.изм Рейтинг.
+ * В слитной строке после barcode остаётся: «name [unit] [rating] [№след.строки]».
+ *   - если `hasNextRow` — крайний правый int это номер следующей строки → срезаем;
+ *   - следующий справа number → rating;
+ *   - следующий справа unit-токен → unit;
+ *   - остаток → name (ведущий артикул вроде «1020» сохраняется).
+ */
+function splitTail(
+  seg: string,
+  hasNextRow: boolean,
+): { name: string; unit: string | null; rating: number | null } {
+  const tokens = cleanChrome(seg).split(" ").filter(Boolean);
+  let unit: string | null = null;
+  let rating: number | null = null;
+
+  if (hasNextRow && tokens.length && TRAILING_INT_RE.test(tokens[tokens.length - 1])) {
+    tokens.pop(); // номер следующей строки
+  }
+  if (tokens.length) {
+    const last = tokens[tokens.length - 1];
+    if (NUMBER_RE.test(last) && last.length <= 6) {
+      rating = parseFloat(last.replace(",", "."));
+      tokens.pop();
+    }
+  }
+  if (tokens.length && UNIT_CELL_RE.test(tokens[tokens.length - 1])) {
+    unit = tokens.pop()!;
+  }
+  return { name: tokens.join(" ").trim(), unit, rating };
+}
+
+/** Эвристика «грязного» имени: содержит шапку/футноут/второй штрихкод/гигантское. */
+function looksDirty(name: string): boolean {
+  if (!name) return true;
+  if (name.length > 180) return true;
+  CHROME_TOKEN_RE.lastIndex = 0;
+  if (CHROME_TOKEN_RE.test(name)) return true;
+  // встроенный второй штрихкод = склейка нескольких строк
+  if (/\d{8,14}.*\d{8,14}/.test(name)) return true;
+  return false;
+}
+
+/**
+ * Fallback-парсер для случая, когда таблица «схлопнулась» в одну слитную
+ * строку. Сегментируем текст по штрихкодам: имя каждого товара — это текст
+ * ПОСЛЕ его barcode и ДО следующего barcode, с обрезкой unit/rating/номера
+ * следующей строки и вырезанным хромом.
+ */
+function segmentByBarcode(text: string): BarcodeCandidate[] {
+  const t = text.replace(/ /g, " ").replace(/\s+/g, " ");
+  const matches = [...t.matchAll(/\d{8,14}/g)];
+  const out: BarcodeCandidate[] = [];
+  const seen = new Set<string>();
+
+  for (let i = 0; i < matches.length; i++) {
+    const bc = matches[i][0];
+    const start = (matches[i].index ?? 0) + bc.length;
+    const end = i + 1 < matches.length ? matches[i + 1].index ?? t.length : t.length;
+    const hasNextRow = i + 1 < matches.length;
+    if (seen.has(bc)) continue;
+
+    const { name, unit, rating } = splitTail(t.slice(start, end), hasNextRow);
+    if (!name || !/[A-Za-zА-Яа-яЁё]/.test(name)) continue; // нет осмысленного названия
+    seen.add(bc);
+    out.push({ barcode: bc, name, unit, rating });
+  }
+  return out;
+}
+
+/** Структурный парс: по одному <td>-столбцу на колонку (идеальный случай). */
+function parseStructuredRows($: cheerio.CheerioAPI): BarcodeCandidate[] {
   const out: BarcodeCandidate[] = [];
   const seen = new Set<string>();
 
@@ -159,56 +239,99 @@ export function parseSearchResults(html: string): BarcodeCandidate[] {
       .map((td) => clean($(td).text()));
     if (cells.length < 2) return;
 
-    // 1) barcode — первая ячейка, целиком состоящая из 8–14 цифр.
     let barcode: string | null = null;
     let barcodeIdx = -1;
     for (let i = 0; i < cells.length; i++) {
       const onlyDigits = cells[i].replace(/\s/g, "");
-      if (EAN_RE.test(onlyDigits) || /^\d{8,14}$/.test(onlyDigits)) {
+      if (/^\d{8,14}$/.test(onlyDigits)) {
         barcode = onlyDigits;
         barcodeIdx = i;
         break;
       }
-      const m = cells[i].match(DIGITS_8_14_RE);
-      if (m && cells[i].replace(/\D/g, "").length === m[1].length) {
-        barcode = m[1];
-        barcodeIdx = i;
-        break;
-      }
     }
-    if (!barcode) return;
-    if (seen.has(barcode)) return;
+    if (!barcode || seen.has(barcode)) return;
 
-    // 2) остальные ячейки → name (самая «текстовая»), unit, rating.
     const rest = cells.filter((_, i) => i !== barcodeIdx);
     let name = "";
     let unit: string | null = null;
-    const numericCells: number[] = [];
-
+    const numbers: number[] = [];
     for (const c of rest) {
       if (!c) continue;
       if (unit == null && UNIT_CELL_RE.test(c)) {
         unit = clean(c);
         continue;
       }
-      if (/^\d+(?:[.,]\d+)?$/.test(c) && c.length <= 6) {
-        numericCells.push(parseFloat(c.replace(",", ".")));
+      if (NUMBER_RE.test(c) && c.length <= 6) {
+        numbers.push(parseFloat(c.replace(",", ".")));
         continue;
       }
-      // name = самая длинная буквосодержащая ячейка
       if (/[A-Za-zА-Яа-яЁё]/.test(c) && c.length > name.length) name = c;
     }
-    // rating — последняя числовая ячейка (колонка рейтинга идёт после
-    // порядкового номера/единицы). Если числовых нет — null.
-    const rating =
-      numericCells.length > 0 ? numericCells[numericCells.length - 1] : null;
-
-    if (!name) return; // строка без названия — мусор
+    name = cleanChrome(name);
+    if (!name) return;
     seen.add(barcode);
-    out.push({ barcode, name, unit, rating });
+    out.push({
+      barcode,
+      name,
+      unit,
+      rating: numbers.length ? numbers[numbers.length - 1] : null,
+    });
   });
 
   return out;
+}
+
+/**
+ * Распарсить страницу результатов barcode-list.ru → список кандидатов.
+ *
+ * Стратегия:
+ *   1. Структурный парс по <td>-колонкам (чистые unit/rating).
+ *   2. Если структурный дал пусто ИЛИ хотя бы одно «грязное» имя (склейка с
+ *      шапкой/футноутом/несколькими штрихкодами) — переключаемся на
+ *      сегментацию по штрихкодам (вырезаем сегмент после barcode до
+ *      unit/rating/следующего barcode).
+ *
+ * candidate.name содержит ТОЛЬКО наименование товара (без «Поиск:», «№»,
+ * «Штрих-код», «Наименование», «Единица измерения», «Рейтинг», футноута).
+ * Дедуп по barcode, порядок появления.
+ */
+export function parseSearchResults(html: string): BarcodeCandidate[] {
+  const $ = cheerio.load(html);
+
+  const structured = parseStructuredRows($);
+  const structuredOk =
+    structured.length > 0 && structured.every((c) => !looksDirty(c.name));
+  if (structuredOk) return structured;
+
+  // Fallback: сегментация. Берём текст таблицы с наибольшим числом штрихкодов
+  // (это таблица результатов), иначе — весь body.
+  let bestText = "";
+  let bestCount = -1;
+  $("table").each((_, tbl) => {
+    const txt = $(tbl).text();
+    const cnt = (txt.match(/\d{8,14}/g) ?? []).length;
+    if (cnt > bestCount) {
+      bestCount = cnt;
+      bestText = txt;
+    }
+  });
+  if (bestCount <= 0) bestText = $("body").text() || html;
+
+  const segmented = segmentByBarcode(bestText);
+
+  // Если в структурном были чистые unit/rating — подмешаем их по barcode.
+  if (structured.length > 0) {
+    const byBc = new Map(structured.map((c) => [c.barcode, c]));
+    for (const c of segmented) {
+      const s = byBc.get(c.barcode);
+      if (s) {
+        if (c.unit == null && s.unit != null) c.unit = s.unit;
+        if (c.rating == null && s.rating != null) c.rating = s.rating;
+        if (looksDirty(c.name) && !looksDirty(s.name)) c.name = s.name;
+      }
+    }
+  }
+  return segmented;
 }
 
 /* ───────── scoring & classification ───────── */
