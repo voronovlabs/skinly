@@ -17,6 +17,7 @@
     "prisma:reset": "prisma migrate reset",
     "scrape:national-catalog": "tsx scripts/scrape-national-catalog.ts",
     "scrape:farera": "tsx scripts/scrape-farera.ts",
+    "enrich:farera-barcodes": "tsx scripts/enrich-farera-barcodes.ts",
     "normalize:national-catalog": "tsx scripts/normalize-national-catalog.ts",
     "merge:national-jsonl": "tsx scripts/merge-national-jsonl.ts"
   },
