@@ -651,6 +651,209 @@ FROM (
 WHERE s.n IS NOT NULL
 ON CONFLICT (alias_norm) DO NOTHING;
 
+-- =============================================================================
+-- РАСШИРЕНИЕ ПОКРЫТИЯ v4 — финальная крупная итерация (цель micro > 0.52).
+--
+-- Группы: NMF/аминокислоты-увлажнители, растительные масла, глюкозидные ПАВ,
+-- химия краски для волос, отдушечные аллергены, протеины, плёнкообразователи,
+-- жирный спирт (myristyl — НЕ сушащий) и спирт (alcohol — сушащий), прочее.
+--
+-- ВАЖНО: 'alcohol' (этиловый/денат) — сушащий (tag alcohol_drying, flag alcohol);
+-- НЕ путать с жирными спиртами cetearyl/cetyl/myristyl (emollient, без тега).
+-- Расширенный словарь benefits/cautions ('dryness','sensitive', …) — как в v3:
+-- features-MV их не читает, движок на не-enum значениях inert. Без медзаявлений.
+-- =============================================================================
+
+-- 1d. Canonical (v4)
+INSERT INTO dm.ingredients_canonical (canonical_id, inci_name, display_ru, display_en, is_junk) VALUES
+  ('adenosine',               'Adenosine',                         'Аденозин',                'Adenosine',                         false),
+  ('sodium_pca',              'Sodium PCA',                        'Натрия PCA',              'Sodium PCA',                        false),
+  ('urea',                    'Urea',                              'Мочевина',                'Urea',                              false),
+  ('alanine',                 'Alanine',                           'Аланин',                  'Alanine',                           false),
+  ('glutamic_acid',           'Glutamic Acid',                     'Глутаминовая кислота',    'Glutamic Acid',                     false),
+  ('valine',                  'Valine',                            'Валин',                   'Valine',                            false),
+  ('aspartic_acid',           'Aspartic Acid',                     'Аспарагиновая кислота',   'Aspartic Acid',                     false),
+  ('phenylalanine',           'Phenylalanine',                     'Фенилаланин',             'Phenylalanine',                     false),
+  ('histidine',               'Histidine',                         'Гистидин',                'Histidine',                         false),
+  ('isoleucine',              'Isoleucine',                        'Изолейцин',               'Isoleucine',                        false),
+  ('sunflower_seed_oil',      'Helianthus Annuus Seed Oil',        'Масло подсолнечника',     'Sunflower Seed Oil',                false),
+  ('jojoba_oil',              'Simmondsia Chinensis Seed Oil',     'Масло жожоба',            'Jojoba Oil',                        false),
+  ('sweet_almond_oil',        'Prunus Amygdalus Dulcis Oil',       'Масло сладкого миндаля',  'Sweet Almond Oil',                  false),
+  ('macadamia_oil',           'Macadamia Ternifolia Seed Oil',     'Масло макадамии',         'Macadamia Oil',                     false),
+  ('oleic_acid',              'Oleic Acid',                        'Олеиновая кислота',       'Oleic Acid',                        false),
+  ('octyldodecanol',          'Octyldodecanol',                    'Октилдодеканол',          'Octyldodecanol',                    false),
+  ('glycol_distearate',       'Glycol Distearate',                 'Гликоль дистеарат',       'Glycol Distearate',                 false),
+  ('decyl_glucoside',         'Decyl Glucoside',                   'Децилглюкозид',           'Decyl Glucoside',                   false),
+  ('coco_glucoside',          'Coco Glucoside',                    'Кокоглюкозид',            'Coco Glucoside',                    false),
+  ('sodium_cetearyl_sulfate', 'Sodium Cetearyl Sulfate',           'Цетеарилсульфат натрия',  'Sodium Cetearyl Sulfate',           false),
+  ('ppg',                     'PPG',                               'ППГ',                     'PPG',                               false),
+  ('n_bis_hydroxyethyl_p_phenylenediamine_sulfate','N,N-bis(2-Hydroxyethyl)-p-Phenylenediamine Sulfate','Бис-гидроксиэтил-п-фенилендиамин сульфат','N-bis Hydroxyethyl p-Phenylenediamine Sulfate',false),
+  ('chlororesorcinol',        'Chlororesorcinol',                  'Хлоррезорцин',            'Chlororesorcinol',                  false),
+  ('diaminophenoxyethanol_hcl','Diaminophenoxyethanol HCl',        'Диаминофеноксиэтанол HCl','Diaminophenoxyethanol HCl',         false),
+  ('amino_hydroxypyridine',   'Amino Hydroxypyridine',             'Аминогидроксипиридин',    'Amino Hydroxypyridine',             false),
+  ('amino_hydroxyethylaminoanisole_sulfate','Amino Hydroxyethylaminoanisole Sulfate','Аминогидроксиэтиламиноанизол сульфат','Amino Hydroxyethylaminoanisole Sulfate',false),
+  ('hydroxycitronellal',      'Hydroxycitronellal',                'Гидроксицитронеллаль',    'Hydroxycitronellal',                false),
+  ('benzyl_benzoate',         'Benzyl Benzoate',                   'Бензилбензоат',           'Benzyl Benzoate',                   false),
+  ('hydrolyzed_rice_protein', 'Hydrolyzed Rice Protein',           'Гидролизат рисового белка','Hydrolyzed Rice Protein',          false),
+  ('hydrolyzed_soy_protein',  'Hydrolyzed Soy Protein',            'Гидролизат соевого белка','Hydrolyzed Soy Protein',            false),
+  ('hydroxyethyl',            'Hydroxyethyl',                      'Гидроксиэтил',            'Hydroxyethyl',                      false),
+  ('c10_alkyl_acrylate_crosspolymer','C10-30 Alkyl Acrylate Crosspolymer','Алкилакрилат кросполимер','C10-30 Alkyl Acrylate Crosspolymer',false),
+  ('phenyl_trimethicone',     'Phenyl Trimethicone',               'Фенилтриметикон',         'Phenyl Trimethicone',               false),
+  ('myristyl_alcohol',        'Myristyl Alcohol',                  'Миристиловый спирт',      'Myristyl Alcohol',                  false),
+  ('alcohol',                 'Alcohol',                           'Спирт',                   'Alcohol',                           false),
+  ('lecithin',                'Lecithin',                          'Лецитин',                 'Lecithin',                          false),
+  ('hydrogenated_lecithin',   'Hydrogenated Lecithin',             'Гидрогенизированный лецитин','Hydrogenated Lecithin',           false),
+  ('sodium_citrate',          'Sodium Citrate',                    'Цитрат натрия',           'Sodium Citrate',                    false),
+  ('menthol',                 'Menthol',                           'Ментол',                  'Menthol',                           false)
+ON CONFLICT (canonical_id) DO UPDATE SET
+  inci_name  = EXCLUDED.inci_name,
+  display_ru = EXCLUDED.display_ru,
+  display_en = EXCLUDED.display_en,
+  is_junk    = EXCLUDED.is_junk;
+
+-- 2d. Properties (v4)
+INSERT INTO dm.ingredient_properties
+  (canonical_id, functions, tags, benefits_for, cautions_for, flags_avoided,
+   comedogenicity, irritancy, allergenicity, pregnancy_caution) VALUES
+  -- NMF / аминокислоты / увлажнители
+  ('adenosine',               '{active,soothing}',          '{active}',    '{aging}',               '{}',          '{}',          0,0,0,false),
+  ('sodium_pca',              '{humectant}',                '{humectant}', '{dryness,dehydration}', '{}',          '{}',          0,0,0,false),
+  ('urea',                    '{humectant}',                '{humectant}', '{dryness}',             '{}',          '{}',          0,1,0,false),
+  ('alanine',                 '{humectant,conditioning}',   '{humectant}', '{dryness}',             '{}',          '{}',          0,0,0,false),
+  ('glutamic_acid',           '{humectant,conditioning}',   '{humectant}', '{dryness}',             '{}',          '{}',          0,0,0,false),
+  ('valine',                  '{humectant,conditioning}',   '{humectant}', '{dryness}',             '{}',          '{}',          0,0,0,false),
+  ('aspartic_acid',           '{humectant,conditioning}',   '{humectant}', '{dryness}',             '{}',          '{}',          0,0,0,false),
+  ('phenylalanine',           '{humectant,conditioning}',   '{humectant}', '{dryness}',             '{}',          '{}',          0,0,0,false),
+  ('histidine',               '{humectant,conditioning}',   '{humectant}', '{dryness}',             '{}',          '{}',          0,0,0,false),
+  ('isoleucine',              '{humectant,conditioning}',   '{humectant}', '{dryness}',             '{}',          '{}',          0,0,0,false),
+  -- растительные масла / эмоленты
+  ('sunflower_seed_oil',      '{emollient}',                '{}',          '{dryness}',             '{}',          '{}',          0,0,0,false),
+  ('jojoba_oil',              '{emollient,occlusive}',      '{}',          '{dryness}',             '{}',          '{}',          2,0,0,false),
+  ('sweet_almond_oil',        '{emollient,occlusive}',      '{}',          '{dryness}',             '{}',          '{}',          2,0,1,false),
+  ('macadamia_oil',           '{emollient,occlusive}',      '{}',          '{dryness}',             '{}',          '{}',          2,0,0,false),
+  ('oleic_acid',              '{emollient}',                '{}',          '{}',                    '{acne}',      '{}',          3,0,0,false),
+  ('octyldodecanol',          '{emollient}',                '{}',          '{}',                    '{}',          '{}',          1,0,0,false),
+  -- ПАВ / эмульгаторы
+  ('glycol_distearate',       '{emollient,emulsifier}',     '{}',          '{}',                    '{}',          '{}',          1,0,0,false),
+  ('decyl_glucoside',         '{surfactant}',               '{}',          '{}',                    '{}',          '{}',          0,1,0,false),
+  ('coco_glucoside',          '{surfactant}',               '{}',          '{}',                    '{}',          '{}',          0,1,0,false),
+  ('sodium_cetearyl_sulfate', '{surfactant,emulsifier}',    '{sulfate_surfactant}','{}',            '{}',          '{sulfates}',  0,1,1,false),
+  ('ppg',                     '{humectant,solvent,emulsifier}','{}',       '{}',                    '{}',          '{}',          0,0,0,false),
+  -- химия краски для волос (cautions=sensitive)
+  ('n_bis_hydroxyethyl_p_phenylenediamine_sulfate','{hair_dye}','{hair_dye}','{}',                  '{sensitive}', '{}',          0,2,3,false),
+  ('chlororesorcinol',        '{hair_dye}',                 '{hair_dye}',  '{}',                    '{sensitive}', '{}',          0,2,2,false),
+  ('diaminophenoxyethanol_hcl','{hair_dye}',                '{hair_dye}',  '{}',                    '{sensitive}', '{}',          0,2,3,false),
+  ('amino_hydroxypyridine',   '{hair_dye}',                 '{hair_dye}',  '{}',                    '{sensitive}', '{}',          0,2,2,false),
+  ('amino_hydroxyethylaminoanisole_sulfate','{hair_dye}',   '{hair_dye}',  '{}',                    '{sensitive}', '{}',          0,2,2,false),
+  -- отдушечные аллергены
+  ('hydroxycitronellal',      '{fragrance}',                '{fragrance,allergen}','{}',            '{}',          '{fragrance}', 0,1,2,false),
+  ('benzyl_benzoate',         '{fragrance}',                '{fragrance,allergen}','{}',            '{}',          '{fragrance}', 0,1,2,false),
+  -- протеины
+  ('hydrolyzed_rice_protein', '{conditioning,hair_repair}', '{}',          '{damaged_hair,dryness}','{}',          '{}',          0,0,0,false),
+  ('hydrolyzed_soy_protein',  '{conditioning,hair_repair}', '{}',          '{damaged_hair,dryness}','{}',          '{}',          0,0,1,false),
+  -- текстура / плёнкообразователи / силикон
+  ('hydroxyethyl',            '{film_former}',              '{}',          '{}',                    '{}',          '{}',          0,0,0,false),
+  ('c10_alkyl_acrylate_crosspolymer','{film_former,thickener}','{}',       '{}',                    '{}',          '{}',          0,0,0,false),
+  ('phenyl_trimethicone',     '{emollient,silicone}',       '{}',          '{}',                    '{}',          '{}',          1,0,0,false),
+  -- жирный спирт (НЕ сушащий)
+  ('myristyl_alcohol',        '{emollient,emulsifier}',     '{}',          '{}',                    '{}',          '{}',          1,0,0,false),
+  -- спирт (сушащий)
+  ('alcohol',                 '{solvent}',                  '{alcohol_drying}','{}',                '{}',          '{alcohol}',   0,2,0,false),
+  -- прочее
+  ('lecithin',                '{emollient,emulsifier}',     '{}',          '{}',                    '{}',          '{}',          0,0,1,false),
+  ('hydrogenated_lecithin',   '{emulsifier}',               '{}',          '{}',                    '{}',          '{}',          0,0,0,false),
+  ('sodium_citrate',          '{ph_adjuster,chelator}',     '{}',          '{}',                    '{}',          '{}',          0,0,0,false),
+  ('menthol',                 '{cooling}',                  '{}',          '{}',                    '{redness}',   '{}',          0,1,1,false)
+ON CONFLICT (canonical_id) DO UPDATE SET
+  functions         = EXCLUDED.functions,
+  tags              = EXCLUDED.tags,
+  benefits_for      = EXCLUDED.benefits_for,
+  cautions_for      = EXCLUDED.cautions_for,
+  flags_avoided     = EXCLUDED.flags_avoided,
+  comedogenicity    = EXCLUDED.comedogenicity,
+  irritancy         = EXCLUDED.irritancy,
+  allergenicity     = EXCLUDED.allergenicity,
+  pregnancy_caution = EXCLUDED.pregnancy_caution;
+
+-- 3d. Aliases (v4)
+INSERT INTO dm.ingredient_aliases (alias_norm, canonical_id, lang, source)
+SELECT n, cid, lang, 'seed'
+FROM (
+  SELECT dm.norm_ingredient_alias(a) AS n, cid, lang
+  FROM (VALUES
+    -- NMF / аминокислоты
+    ('adenosine','adenosine','en'), ('аденозин','adenosine','ru'),
+    ('sodium pca','sodium_pca','en'), ('na pca','sodium_pca','en'), ('натрия pca','sodium_pca','mixed'),
+    ('urea','urea','en'), ('carbamide','urea','en'), ('мочевина','urea','ru'),
+    ('alanine','alanine','en'), ('аланин','alanine','ru'),
+    ('glutamic acid','glutamic_acid','en'), ('глутаминовая кислота','glutamic_acid','ru'),
+    ('valine','valine','en'), ('валин','valine','ru'),
+    ('aspartic acid','aspartic_acid','en'), ('аспарагиновая кислота','aspartic_acid','ru'),
+    ('phenylalanine','phenylalanine','en'), ('фенилаланин','phenylalanine','ru'),
+    ('histidine','histidine','en'), ('гистидин','histidine','ru'),
+    ('isoleucine','isoleucine','en'), ('изолейцин','isoleucine','ru'),
+    -- растительные масла
+    ('helianthus annuus sunflower seed oil','sunflower_seed_oil','en'),
+    ('helianthus annuus seed oil','sunflower_seed_oil','en'), ('sunflower seed oil','sunflower_seed_oil','en'),
+    ('sunflower oil','sunflower_seed_oil','en'), ('масло подсолнечника','sunflower_seed_oil','ru'),
+    ('подсолнечное масло','sunflower_seed_oil','ru'),
+    ('simmondsia chinensis jojoba seed oil','jojoba_oil','en'),
+    ('simmondsia chinensis seed oil','jojoba_oil','en'), ('jojoba seed oil','jojoba_oil','en'),
+    ('jojoba oil','jojoba_oil','en'), ('масло жожоба','jojoba_oil','ru'),
+    ('prunus amygdalus dulcis sweet almond oil','sweet_almond_oil','en'),
+    ('prunus amygdalus dulcis oil','sweet_almond_oil','en'), ('sweet almond oil','sweet_almond_oil','en'),
+    ('almond oil','sweet_almond_oil','en'), ('масло сладкого миндаля','sweet_almond_oil','ru'),
+    ('миндальное масло','sweet_almond_oil','ru'),
+    ('macadamia ternifolia seed oil','macadamia_oil','en'), ('macadamia seed oil','macadamia_oil','en'),
+    ('macadamia oil','macadamia_oil','en'), ('масло макадамии','macadamia_oil','ru'),
+    ('oleic acid','oleic_acid','en'), ('олеиновая кислота','oleic_acid','ru'),
+    ('octyldodecanol','octyldodecanol','en'), ('октилдодеканол','octyldodecanol','ru'),
+    -- ПАВ / эмульгаторы
+    ('glycol distearate','glycol_distearate','en'), ('гликоль дистеарат','glycol_distearate','ru'),
+    ('decyl glucoside','decyl_glucoside','en'), ('децилглюкозид','decyl_glucoside','ru'),
+    ('coco glucoside','coco_glucoside','en'), ('кокоглюкозид','coco_glucoside','ru'),
+    ('sodium cetearyl sulfate','sodium_cetearyl_sulfate','en'), ('цетеарилсульфат натрия','sodium_cetearyl_sulfate','ru'),
+    ('ppg','ppg','en'), ('ппг','ppg','ru'),
+    -- химия краски для волос
+    ('n bis hydroxyethyl p phenylenediamine sulfate','n_bis_hydroxyethyl_p_phenylenediamine_sulfate','en'),
+    ('chlororesorcinol','chlororesorcinol','en'), ('хлоррезорцин','chlororesorcinol','ru'),
+    ('diaminophenoxyethanol hcl','diaminophenoxyethanol_hcl','en'),
+    ('diaminophenoxyethanol','diaminophenoxyethanol_hcl','en'),
+    ('amino hydroxypyridine','amino_hydroxypyridine','en'),
+    ('amino hydroxyethylaminoanisole sulfate','amino_hydroxyethylaminoanisole_sulfate','en'),
+    -- отдушечные аллергены
+    ('hydroxycitronellal','hydroxycitronellal','en'), ('гидроксицитронеллаль','hydroxycitronellal','ru'),
+    ('benzyl benzoate','benzyl_benzoate','en'), ('бензилбензоат','benzyl_benzoate','ru'),
+    ('бензил бензоат','benzyl_benzoate','ru'),
+    -- протеины
+    ('hydrolyzed rice protein','hydrolyzed_rice_protein','en'), ('гидролизованный рисовый протеин','hydrolyzed_rice_protein','ru'),
+    ('hydrolyzed soy protein','hydrolyzed_soy_protein','en'), ('гидролизованный соевый протеин','hydrolyzed_soy_protein','ru'),
+    -- текстура / плёнки / силикон
+    ('hydroxyethyl','hydroxyethyl','en'),
+    ('c10 alkyl acrylate crosspolymer','c10_alkyl_acrylate_crosspolymer','en'),
+    ('alkyl acrylate crosspolymer','c10_alkyl_acrylate_crosspolymer','en'),
+    ('phenyl trimethicone','phenyl_trimethicone','en'), ('фенилтриметикон','phenyl_trimethicone','ru'),
+    -- жирный спирт (НЕ сушащий)
+    ('myristyl alcohol','myristyl_alcohol','en'), ('миристиловый спирт','myristyl_alcohol','ru'),
+    -- спирт (сушащий)
+    ('alcohol','alcohol','en'), ('ethyl alcohol','alcohol','en'), ('спирт','alcohol','ru'),
+    ('этиловый спирт','alcohol','ru'),
+    -- прочее
+    ('lecithin','lecithin','en'), ('лецитин','lecithin','ru'),
+    ('hydrogenated lecithin','hydrogenated_lecithin','en'), ('гидрогенизированный лецитин','hydrogenated_lecithin','ru'),
+    ('sodium citrate','sodium_citrate','en'), ('цитрат натрия','sodium_citrate','ru'),
+    ('menthol','menthol','en'), ('ментол','menthol','ru'),
+    -- water (обязательные расширения)
+    ('water aqua','water','en'), ('aqua вода','water','mixed'), ('aqua water eau','water','en'),
+    ('очищенная вода','water','ru'), ('деминерализованная вода','water','ru'),
+    ('вода дистиллированная','water','ru'), ('вода деионизированная','water','ru'),
+    ('дистиллированная вода','water','ru'), ('deionized water','water','en'),
+    ('distilled water','water','en'), ('treated water','water','en')
+  ) AS v(a, cid, lang)
+) s
+WHERE s.n IS NOT NULL
+ON CONFLICT (alias_norm) DO NOTHING;
+
 -- ─────────────────────────── 4. Sanity ────────────────────────────────────────
 DO $sanity$
 DECLARE c_canon int; c_alias int; c_prop int;
@@ -678,6 +881,15 @@ BEGIN
   ASSERT (SELECT canonical_id FROM dm.ingredient_aliases WHERE alias_norm = dm.norm_ingredient_alias('benzyl salicylate')) = 'benzyl_salicylate';
   ASSERT (SELECT canonical_id FROM dm.ingredient_aliases WHERE alias_norm = dm.norm_ingredient_alias('alpha-isomethyl ionone')) = 'alpha_isomethyl_ionone';
   ASSERT (SELECT canonical_id FROM dm.ingredient_aliases WHERE alias_norm = dm.norm_ingredient_alias('p-phenylenediamine')) = 'p_phenylenediamine';
+  -- v4 coverage:
+  ASSERT (SELECT canonical_id FROM dm.ingredient_aliases WHERE alias_norm = dm.norm_ingredient_alias('water aqua')) = 'water';
+  ASSERT (SELECT canonical_id FROM dm.ingredient_aliases WHERE alias_norm = dm.norm_ingredient_alias('alcohol')) = 'alcohol';
+  ASSERT (SELECT canonical_id FROM dm.ingredient_aliases WHERE alias_norm = dm.norm_ingredient_alias('myristyl alcohol')) = 'myristyl_alcohol';
+  ASSERT (SELECT canonical_id FROM dm.ingredient_aliases WHERE alias_norm = dm.norm_ingredient_alias('hydroxycitronellal')) = 'hydroxycitronellal';
+  ASSERT (SELECT canonical_id FROM dm.ingredient_aliases WHERE alias_norm = dm.norm_ingredient_alias('jojoba oil')) = 'jojoba_oil';
+  -- 'alcohol' (сушащий) и 'myristyl_alcohol' (жирный) не пересекаются по тегам:
+  ASSERT ('alcohol_drying' = ANY((SELECT tags FROM dm.ingredient_properties WHERE canonical_id = 'alcohol')));
+  ASSERT NOT ('alcohol_drying' = ANY((SELECT tags FROM dm.ingredient_properties WHERE canonical_id = 'myristyl_alcohol')));
   RAISE NOTICE 'seed sanity: OK';
 END
 $sanity$;
