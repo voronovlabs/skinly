@@ -252,6 +252,204 @@ FROM (
 WHERE s.n IS NOT NULL
 ON CONFLICT (alias_norm) DO NOTHING;
 
+-- =============================================================================
+-- РАСШИРЕНИЕ ПОКРЫТИЯ v2 — топ нераспознанных ингредиентов из 33_audit.
+--
+-- Это функциональные эксципиенты (консерванты, ПАВ, эмульгаторы, гликоли-
+-- увлажнители, силиконы, хелаторы, загустители, жирные спирты), отдушечные
+-- аллергены, красители CI и активы краски для волос. Семантика консервативная:
+-- если эффект на кожу неизвестен / нейтрален — оставляем neutral (никаких
+-- benefits/cautions, флаги пустые). Никаких медицинских заявлений.
+--
+-- Семейства (номера срезаются в dm.norm_ingredient_alias, поэтому
+-- polyquaternium-7 / ceteareth-20 / laureth-4 / polysorbate 20 схлопываются
+-- автоматически): polyquaternium, ceteareth, laureth, polysorbate.
+-- =============================================================================
+
+-- 1b. Canonical (v2)
+INSERT INTO dm.ingredients_canonical (canonical_id, inci_name, display_ru, display_en, is_junk) VALUES
+  ('colorant_ci',                  'CI',                          'Краситель (CI)',          'Colorant (CI)',                false),
+  ('phenoxyethanol',               'Phenoxyethanol',              'Феноксиэтанол',           'Phenoxyethanol',               false),
+  ('cetearyl_alcohol',             'Cetearyl Alcohol',            'Цетеариловый спирт',      'Cetearyl Alcohol',             false),
+  ('propylene_glycol',             'Propylene Glycol',            'Пропиленгликоль',         'Propylene Glycol',             false),
+  ('polyquaternium',               'Polyquaternium',              'Поликватерниум',          'Polyquaternium',               false),
+  ('disodium_edta',                'Disodium EDTA',               'Динатрия ЭДТА',           'Disodium EDTA',                false),
+  ('ethylhexylglycerin',           'Ethylhexylglycerin',          'Этилгексилглицерин',      'Ethylhexylglycerin',           false),
+  ('ceteareth',                    'Ceteareth',                   'Цетеарет',                'Ceteareth',                    false),
+  ('sodium_benzoate',              'Sodium Benzoate',             'Бензоат натрия',          'Sodium Benzoate',              false),
+  ('cocamidopropyl_betaine',       'Cocamidopropyl Betaine',      'Кокамидопропилбетаин',    'Cocamidopropyl Betaine',       false),
+  ('butylene_glycol',              'Butylene Glycol',             'Бутиленгликоль',          'Butylene Glycol',              false),
+  ('dimethicone',                  'Dimethicone',                 'Диметикон',               'Dimethicone',                  false),
+  ('sodium_chloride',              'Sodium Chloride',             'Хлорид натрия',           'Sodium Chloride',              false),
+  ('cetrimonium_chloride',         'Cetrimonium Chloride',        'Цетримония хлорид',       'Cetrimonium Chloride',         false),
+  ('hexanediol',                   'Hexanediol',                  'Гександиол',              'Hexanediol',                   false),
+  ('potassium_sorbate',            'Potassium Sorbate',           'Сорбат калия',            'Potassium Sorbate',            false),
+  ('hexyl_cinnamal',               'Hexyl Cinnamal',              'Гексилциннамаль',         'Hexyl Cinnamal',               false),
+  ('benzyl_alcohol',               'Benzyl Alcohol',              'Бензиловый спирт',        'Benzyl Alcohol',               false),
+  ('peg_castor_oil',               'PEG Hydrogenated Castor Oil', 'ПЭГ касторовое масло',    'PEG Hydrogenated Castor Oil',  false),
+  ('glyceryl_stearate',            'Glyceryl Stearate',           'Глицерил стеарат',        'Glyceryl Stearate',            false),
+  ('laureth',                      'Laureth',                     'Лаурет',                  'Laureth',                      false),
+  ('tetrasodium_edta',             'Tetrasodium EDTA',            'Тетранатрия ЭДТА',        'Tetrasodium EDTA',             false),
+  ('citronellol',                  'Citronellol',                 'Цитронеллол',             'Citronellol',                  false),
+  ('xanthan_gum',                  'Xanthan Gum',                 'Ксантановая камедь',      'Xanthan Gum',                  false),
+  ('caprylic_capric_triglyceride', 'Caprylic/Capric Triglyceride','Каприловый триглицерид',  'Caprylic/Capric Triglyceride', false),
+  ('sodium_sulfite',               'Sodium Sulfite',              'Сульфит натрия',          'Sodium Sulfite',               false),
+  ('hydrolyzed_keratin',           'Hydrolyzed Keratin',          'Гидролизованный кератин', 'Hydrolyzed Keratin',           false),
+  ('caprylyl_glycol',              'Caprylyl Glycol',             'Каприлилгликоль',         'Caprylyl Glycol',              false),
+  ('ammonium_hydroxide',           'Ammonium Hydroxide',          'Гидроксид аммония',       'Ammonium Hydroxide',           false),
+  ('m_aminophenol',                'm-Aminophenol',               'м-Аминофенол',            'm-Aminophenol',                false),
+  ('methylisothiazolinone',        'Methylisothiazolinone',       'Метилизотиазолинон',      'Methylisothiazolinone',        false),
+  ('arginine',                     'Arginine',                    'Аргинин',                 'Arginine',                     false),
+  ('polysorbate',                  'Polysorbate',                 'Полисорбат',              'Polysorbate',                  false),
+  ('methylchloroisothiazolinone',  'Methylchloroisothiazolinone', 'Метилхлоризотиазолинон',  'Methylchloroisothiazolinone',  false),
+  ('carbomer',                     'Carbomer',                    'Карбомер',                'Carbomer',                     false),
+  ('stearic_acid',                 'Stearic Acid',                'Стеариновая кислота',     'Stearic Acid',                 false),
+  ('resorcinol',                   'Resorcinol',                  'Резорцин',                'Resorcinol',                   false)
+ON CONFLICT (canonical_id) DO UPDATE SET
+  inci_name  = EXCLUDED.inci_name,
+  display_ru = EXCLUDED.display_ru,
+  display_en = EXCLUDED.display_en,
+  is_junk    = EXCLUDED.is_junk;
+
+-- 2b. Properties (v2). comedo 0..5 · irr 0..3 · allerg 0..3 — seed-эвристики.
+-- ВАЖНО: жирные спирты (cetearyl/cetyl/stearyl) — это emollient, НЕ alcohol_drying
+-- (тег не ставим, иначе ложный has_drying_alcohol на половине каталога).
+-- stearic_acid — жирная кислота (emollient), НЕ кислота-эксфолиант (без exfoliant-тега).
+INSERT INTO dm.ingredient_properties
+  (canonical_id, functions, tags, benefits_for, cautions_for, flags_avoided,
+   comedogenicity, irritancy, allergenicity, pregnancy_caution) VALUES
+  ('colorant_ci',                  '{colorant}',                  '{}',          '{}','{}','{}',           0,0,1,false),
+  ('phenoxyethanol',               '{preservative}',              '{}',          '{}','{}','{}',           0,1,1,false),
+  ('cetearyl_alcohol',             '{emollient,emulsifier}',      '{}',          '{}','{}','{}',           1,0,0,false),
+  ('propylene_glycol',             '{humectant,solvent}',         '{humectant}', '{}','{}','{}',           0,1,1,false),
+  ('polyquaternium',               '{conditioning}',              '{}',          '{}','{}','{}',           0,0,0,false),
+  ('disodium_edta',                '{chelator}',                  '{}',          '{}','{}','{}',           0,0,0,false),
+  ('ethylhexylglycerin',           '{preservative,humectant}',    '{}',          '{}','{}','{}',           0,0,0,false),
+  ('ceteareth',                    '{emulsifier,surfactant}',     '{}',          '{}','{}','{}',           1,0,0,false),
+  ('sodium_benzoate',              '{preservative}',              '{}',          '{}','{}','{}',           0,0,1,false),
+  ('cocamidopropyl_betaine',       '{surfactant}',                '{}',          '{}','{}','{}',           0,1,1,false),
+  ('butylene_glycol',              '{humectant,solvent}',         '{humectant}', '{}','{}','{}',           0,0,0,false),
+  ('dimethicone',                  '{emollient,occlusive,silicone}','{occlusive}','{}','{}','{}',          1,0,0,false),
+  ('sodium_chloride',              '{thickener}',                 '{}',          '{}','{}','{}',           0,0,0,false),
+  ('cetrimonium_chloride',         '{conditioning,surfactant}',   '{}',          '{}','{}','{}',           0,1,1,false),
+  ('hexanediol',                   '{preservative,solvent,humectant}','{}',      '{}','{}','{}',           0,0,0,false),
+  ('potassium_sorbate',            '{preservative}',              '{}',          '{}','{}','{}',           0,0,1,false),
+  ('hexyl_cinnamal',               '{fragrance}',                 '{fragrance}', '{}','{}','{fragrance}',  0,1,3,false),
+  ('benzyl_alcohol',               '{preservative,solvent}',      '{}',          '{}','{}','{}',           0,1,2,false),
+  ('peg_castor_oil',               '{emulsifier,surfactant}',     '{}',          '{}','{}','{}',           1,0,0,false),
+  ('glyceryl_stearate',            '{emollient,emulsifier}',      '{}',          '{}','{}','{}',           1,0,0,false),
+  ('laureth',                      '{surfactant,emulsifier}',     '{}',          '{}','{}','{}',           0,1,0,false),
+  ('tetrasodium_edta',             '{chelator}',                  '{}',          '{}','{}','{}',           0,0,0,false),
+  ('citronellol',                  '{fragrance}',                 '{fragrance}', '{}','{}','{fragrance}',  0,1,3,false),
+  ('xanthan_gum',                  '{thickener}',                 '{}',          '{}','{}','{}',           0,0,0,false),
+  ('caprylic_capric_triglyceride', '{emollient}',                 '{}',          '{}','{}','{}',           1,0,0,false),
+  ('sodium_sulfite',               '{antioxidant,preservative}',  '{}',          '{}','{}','{}',           0,1,1,false),
+  ('hydrolyzed_keratin',           '{conditioning}',              '{}',          '{}','{}','{}',           0,0,1,false),
+  ('caprylyl_glycol',              '{humectant,preservative}',    '{humectant}', '{}','{}','{}',           0,0,0,false),
+  ('ammonium_hydroxide',           '{ph_adjuster}',               '{}',          '{}','{}','{}',           0,2,1,false),
+  ('m_aminophenol',                '{hair_dye}',                  '{}',          '{}','{}','{}',           0,2,3,false),
+  ('methylisothiazolinone',        '{preservative}',              '{}',          '{}','{}','{}',           0,2,3,false),
+  ('arginine',                     '{ph_adjuster,humectant}',     '{humectant}', '{}','{}','{}',           0,0,0,false),
+  ('polysorbate',                  '{emulsifier,surfactant}',     '{}',          '{}','{}','{}',           0,0,0,false),
+  ('methylchloroisothiazolinone',  '{preservative}',              '{}',          '{}','{}','{}',           0,2,3,false),
+  ('carbomer',                     '{thickener}',                 '{}',          '{}','{}','{}',           0,0,0,false),
+  ('stearic_acid',                 '{emollient,emulsifier}',      '{}',          '{}','{}','{}',           2,0,0,false),
+  ('resorcinol',                   '{hair_dye}',                  '{}',          '{}','{}','{}',           0,2,3,false)
+ON CONFLICT (canonical_id) DO UPDATE SET
+  functions         = EXCLUDED.functions,
+  tags              = EXCLUDED.tags,
+  benefits_for      = EXCLUDED.benefits_for,
+  cautions_for      = EXCLUDED.cautions_for,
+  flags_avoided     = EXCLUDED.flags_avoided,
+  comedogenicity    = EXCLUDED.comedogenicity,
+  irritancy         = EXCLUDED.irritancy,
+  allergenicity     = EXCLUDED.allergenicity,
+  pregnancy_caution = EXCLUDED.pregnancy_caution;
+
+-- 3b. Aliases (v2) — RU/EN + варианты + расширения water/fragrance.
+INSERT INTO dm.ingredient_aliases (alias_norm, canonical_id, lang, source)
+SELECT n, cid, lang, 'seed'
+FROM (
+  SELECT dm.norm_ingredient_alias(a) AS n, cid, lang
+  FROM (VALUES
+    -- colorant CI (после нормализации «CI 77491» → «ci»)
+    ('ci','colorant_ci','en'), ('color index','colorant_ci','en'),
+    ('краситель','colorant_ci','ru'), ('пигмент','colorant_ci','ru'),
+    -- preservatives
+    ('phenoxyethanol','phenoxyethanol','en'), ('феноксиэтанол','phenoxyethanol','ru'),
+    ('sodium benzoate','sodium_benzoate','en'), ('бензоат натрия','sodium_benzoate','ru'),
+    ('potassium sorbate','potassium_sorbate','en'), ('сорбат калия','potassium_sorbate','ru'),
+    ('ethylhexylglycerin','ethylhexylglycerin','en'), ('этилгексилглицерин','ethylhexylglycerin','ru'),
+    ('benzyl alcohol','benzyl_alcohol','en'), ('бензиловый спирт','benzyl_alcohol','ru'),
+    ('methylisothiazolinone','methylisothiazolinone','en'), ('метилизотиазолинон','methylisothiazolinone','ru'),
+    ('methylchloroisothiazolinone','methylchloroisothiazolinone','en'), ('метилхлоризотиазолинон','methylchloroisothiazolinone','ru'),
+    -- fatty alcohols (emollient — НЕ drying)
+    ('cetearyl alcohol','cetearyl_alcohol','en'), ('cetyl alcohol','cetearyl_alcohol','en'),
+    ('stearyl alcohol','cetearyl_alcohol','en'), ('цетеариловый спирт','cetearyl_alcohol','ru'),
+    ('цетиловый спирт','cetearyl_alcohol','ru'), ('стеариловый спирт','cetearyl_alcohol','ru'),
+    -- glycols (humectant/solvent)
+    ('propylene glycol','propylene_glycol','en'), ('пропиленгликоль','propylene_glycol','ru'),
+    ('butylene glycol','butylene_glycol','en'), ('бутиленгликоль','butylene_glycol','ru'),
+    ('hexanediol','hexanediol','en'), ('гександиол','hexanediol','ru'),
+    ('caprylyl glycol','caprylyl_glycol','en'), ('каприлилгликоль','caprylyl_glycol','ru'),
+    -- silicones
+    ('dimethicone','dimethicone','en'), ('диметикон','dimethicone','ru'),
+    ('cyclopentasiloxane','dimethicone','en'), ('cyclomethicone','dimethicone','en'),
+    ('циклопентасилоксан','dimethicone','ru'),
+    -- chelators
+    ('disodium edta','disodium_edta','en'), ('edta','disodium_edta','en'), ('эдта','disodium_edta','ru'),
+    ('динатрия эдта','disodium_edta','ru'),
+    ('tetrasodium edta','tetrasodium_edta','en'), ('тетранатрия эдта','tetrasodium_edta','ru'),
+    -- thickeners
+    ('xanthan gum','xanthan_gum','en'), ('ксантановая камедь','xanthan_gum','ru'), ('ксантан','xanthan_gum','ru'),
+    ('carbomer','carbomer','en'), ('карбомер','carbomer','ru'),
+    ('sodium chloride','sodium_chloride','en'), ('хлорид натрия','sodium_chloride','ru'), ('соль','sodium_chloride','ru'),
+    -- surfactants / emulsifiers (+ семейства)
+    ('cocamidopropyl betaine','cocamidopropyl_betaine','en'), ('кокамидопропилбетаин','cocamidopropyl_betaine','ru'),
+    ('cetrimonium chloride','cetrimonium_chloride','en'), ('цетримония хлорид','cetrimonium_chloride','ru'),
+    ('glyceryl stearate','glyceryl_stearate','en'), ('глицерил стеарат','glyceryl_stearate','ru'),
+    ('peg hydrogenated castor oil','peg_castor_oil','en'), ('hydrogenated castor oil','peg_castor_oil','en'),
+    ('пэг касторовое масло','peg_castor_oil','ru'),
+    ('stearic acid','stearic_acid','en'), ('стеариновая кислота','stearic_acid','ru'),
+    ('polyquaternium','polyquaternium','en'), ('поликватерниум','polyquaternium','ru'),
+    ('ceteareth','ceteareth','en'), ('цетеарет','ceteareth','ru'),
+    ('laureth','laureth','en'), ('лаурет','laureth','ru'),
+    ('polysorbate','polysorbate','en'), ('полисорбат','polysorbate','ru'),
+    -- emollient esters
+    ('caprylic capric triglyceride','caprylic_capric_triglyceride','en'),
+    ('caprylic','caprylic_capric_triglyceride','en'),
+    ('capric triglyceride','caprylic_capric_triglyceride','en'),
+    ('каприловый каприновый триглицерид','caprylic_capric_triglyceride','ru'),
+    ('каприловый триглицерид','caprylic_capric_triglyceride','ru'),
+    -- fragrance allergens (отдельная каноника, флаг fragrance)
+    ('hexyl cinnamal','hexyl_cinnamal','en'), ('гексилциннамаль','hexyl_cinnamal','ru'),
+    ('citronellol','citronellol','en'), ('цитронеллол','citronellol','ru'),
+    -- conditioning / proteins
+    ('hydrolyzed keratin','hydrolyzed_keratin','en'), ('гидролизованный кератин','hydrolyzed_keratin','ru'),
+    ('кератин','hydrolyzed_keratin','ru'),
+    ('arginine','arginine','en'), ('аргинин','arginine','ru'),
+    -- hair dye actives / oxidisers (раздражители/аллергены — без benefits)
+    ('ammonium hydroxide','ammonium_hydroxide','en'), ('гидроксид аммония','ammonium_hydroxide','ru'),
+    ('аммиак','ammonium_hydroxide','ru'),
+    ('m aminophenol','m_aminophenol','en'), ('p aminophenol','m_aminophenol','en'),
+    ('aminophenol','m_aminophenol','en'), ('аминофенол','m_aminophenol','ru'),
+    ('resorcinol','resorcinol','en'), ('резорцин','resorcinol','ru'),
+    ('sodium sulfite','sodium_sulfite','en'), ('сульфит натрия','sodium_sulfite','ru'),
+    -- water (расширение синонимов)
+    ('distilled water','water','en'), ('deionized water','water','en'), ('di water','water','en'),
+    ('очищенная вода','water','ru'), ('морская вода','water','ru'), ('вода морская','water','ru'),
+    ('sea water','water','en'), ('aqua marina','water','en'), ('maris aqua','water','en'),
+    ('термальная вода','water','ru'), ('thermal water','water','en'), ('aqua eau','water','en'),
+    -- fragrance (расширение синонимов)
+    ('parfum fragrance','fragrance','en'), ('fragrance parfum','fragrance','en'),
+    ('парфюмерная отдушка','fragrance','ru'), ('отдушка парфюмерная','fragrance','ru'),
+    ('parfum отдушка','fragrance','mixed'), ('parfume','fragrance','en'),
+    ('парфюм ароматизатор','fragrance','ru'), ('парфюм','fragrance','ru'), ('aroma','fragrance','en')
+  ) AS v(a, cid, lang)
+) s
+WHERE s.n IS NOT NULL
+ON CONFLICT (alias_norm) DO NOTHING;
+
 -- ─────────────────────────── 4. Sanity ────────────────────────────────────────
 DO $sanity$
 DECLARE c_canon int; c_alias int; c_prop int;
@@ -265,6 +463,15 @@ BEGIN
   ASSERT (SELECT canonical_id FROM dm.ingredient_aliases WHERE alias_norm = dm.norm_ingredient_alias('Parfum')) = 'fragrance';
   ASSERT (SELECT canonical_id FROM dm.ingredient_aliases WHERE alias_norm = dm.norm_ingredient_alias('Отдушка')) = 'fragrance';
   ASSERT (SELECT canonical_id FROM dm.ingredient_aliases WHERE alias_norm = dm.norm_ingredient_alias('Niacinamide 4%')) = 'niacinamide';
+  -- v2 coverage:
+  ASSERT (SELECT canonical_id FROM dm.ingredient_aliases WHERE alias_norm = dm.norm_ingredient_alias('parfum fragrance')) = 'fragrance';
+  ASSERT (SELECT canonical_id FROM dm.ingredient_aliases WHERE alias_norm = dm.norm_ingredient_alias('очищенная вода')) = 'water';
+  ASSERT (SELECT canonical_id FROM dm.ingredient_aliases WHERE alias_norm = dm.norm_ingredient_alias('феноксиэтанол')) = 'phenoxyethanol';
+  ASSERT (SELECT canonical_id FROM dm.ingredient_aliases WHERE alias_norm = dm.norm_ingredient_alias('ci 77491')) = 'colorant_ci';
+  ASSERT (SELECT canonical_id FROM dm.ingredient_aliases WHERE alias_norm = dm.norm_ingredient_alias('Cetearyl Alcohol')) = 'cetearyl_alcohol';
+  -- жирный спирт НЕ помечается как сушащий (иначе ложный has_drying_alcohol):
+  ASSERT NOT ('alcohol_drying' = ANY(
+    (SELECT tags FROM dm.ingredient_properties WHERE canonical_id = 'cetearyl_alcohol')));
   RAISE NOTICE 'seed sanity: OK';
 END
 $sanity$;
