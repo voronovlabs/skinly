@@ -450,6 +450,207 @@ FROM (
 WHERE s.n IS NOT NULL
 ON CONFLICT (alias_norm) DO NOTHING;
 
+-- =============================================================================
+-- РАСШИРЕНИЕ ПОКРЫТИЯ v3 — третья итерация (цель recognized_ratio_micro > 0.50).
+--
+-- Группы: отдушечные аллергены, химия краски для волос, гликоли-увлажнители,
+-- протеины/аминокислоты, масла-эмоленты, загустители/плёнкообразователи,
+-- ПАВ/эмульгаторы, pH-корректоры, силикон (amodimethicone).
+--
+-- ПРИМ.: benefits_for/cautions_for здесь используют расширенный словарь
+-- ('dryness','dehydration','damaged_hair','sensitive') — это документирование
+-- намерения. Текущий dm.product_ingredient_features эти поля НЕ читает (берёт
+-- только tags/flags_avoided/comedo/irr/allerg), а движок на не-enum значениях
+-- просто не срабатывает (inert). Никаких медицинских заявлений.
+--
+-- shea butter уже есть как canonical 'shea_butter' → ниже только новые алиасы.
+-- =============================================================================
+
+-- 1c. Canonical (v3)
+INSERT INTO dm.ingredients_canonical (canonical_id, inci_name, display_ru, display_en, is_junk) VALUES
+  ('benzyl_salicylate',                 'Benzyl Salicylate',                 'Бензилсалицилат',        'Benzyl Salicylate',                 false),
+  ('geraniol',                          'Geraniol',                          'Гераниол',               'Geraniol',                          false),
+  ('alpha_isomethyl_ionone',            'Alpha-Isomethyl Ionone',            'Альфа-изометил ионон',   'Alpha-Isomethyl Ionone',            false),
+  ('coumarin',                          'Coumarin',                          'Кумарин',                'Coumarin',                          false),
+  ('citral',                            'Citral',                            'Цитраль',                'Citral',                            false),
+  ('toluene',                           'Toluene',                           'Толуол',                 'Toluene',                           false),
+  ('sodium_hydrosulfite',              'Sodium Hydrosulfite',                'Гидросульфит натрия',    'Sodium Hydrosulfite',               false),
+  ('diamine_sulfate',                   'Diamine Sulfate',                   'Диамин сульфат',         'Diamine Sulfate',                   false),
+  ('methylresorcinol',                  'Methylresorcinol',                  'Метилрезорцин',          'Methylresorcinol',                  false),
+  ('amino_hydroxytoluene',             'Amino Hydroxytoluene',               'Аминогидрокситолуол',    'Amino Hydroxytoluene',              false),
+  ('p_phenylenediamine',                'p-Phenylenediamine',                'Парафенилендиамин',      'p-Phenylenediamine',                false),
+  ('ethanolamine',                      'Ethanolamine',                      'Этаноламин',             'Ethanolamine',                      false),
+  ('sodium_erythorbate',                'Sodium Erythorbate',                'Эриторбат натрия',       'Sodium Erythorbate',                false),
+  ('bht',                               'BHT',                               'Бутилгидрокситолуол',    'BHT',                               false),
+  ('propanediol',                       'Propanediol',                       'Пропандиол',             'Propanediol',                       false),
+  ('pentylene_glycol',                  'Pentylene Glycol',                  'Пентиленгликоль',        'Pentylene Glycol',                  false),
+  ('dipropylene_glycol',                'Dipropylene Glycol',                'Дипропиленгликоль',      'Dipropylene Glycol',                false),
+  ('sorbitol',                          'Sorbitol',                          'Сорбитол',               'Sorbitol',                          false),
+  ('hydrolyzed_wheat_protein',          'Hydrolyzed Wheat Protein',          'Гидролизат пшеничного белка','Hydrolyzed Wheat Protein',       false),
+  ('hydrolyzed_collagen',               'Hydrolyzed Collagen',               'Гидролизованный коллаген','Hydrolyzed Collagen',              false),
+  ('serine',                            'Serine',                            'Серин',                  'Serine',                            false),
+  ('glycine',                           'Glycine',                           'Глицин',                 'Glycine',                           false),
+  ('threonine',                         'Threonine',                         'Треонин',                'Threonine',                         false),
+  ('proline',                           'Proline',                           'Пролин',                 'Proline',                           false),
+  ('argan_oil',                         'Argania Spinosa Kernel Oil',        'Аргановое масло',        'Argan Oil',                         false),
+  ('hydroxyethylcellulose',             'Hydroxyethylcellulose',             'Гидроксиэтилцеллюлоза',  'Hydroxyethylcellulose',             false),
+  ('acrylates',                         'Acrylates Copolymer',               'Акрилаты',               'Acrylates Copolymer',               false),
+  ('silica',                            'Silica',                            'Диоксид кремния',        'Silica',                            false),
+  ('mica',                              'Mica',                              'Слюда',                  'Mica',                              false),
+  ('guar_hydroxypropyltrimonium_chloride','Guar Hydroxypropyltrimonium Chloride','Гуар гидроксипропилтримония хлорид','Guar Hydroxypropyltrimonium Chloride',false),
+  ('trideceth',                         'Trideceth',                         'Тридецет',               'Trideceth',                         false),
+  ('cocamide_mea',                      'Cocamide MEA',                      'Кокамид МЕА',            'Cocamide MEA',                      false),
+  ('cocamide_dea',                      'Cocamide DEA',                      'Кокамид ДЕА',            'Cocamide DEA',                      false),
+  ('peg',                               'PEG',                               'ПЭГ',                    'PEG',                               false),
+  ('peg_stearate',                      'PEG Stearate',                      'ПЭГ стеарат',            'PEG Stearate',                      false),
+  ('behentrimonium_chloride',           'Behentrimonium Chloride',           'Бегентримония хлорид',   'Behentrimonium Chloride',           false),
+  ('sodium_hydroxide',                  'Sodium Hydroxide',                  'Гидроксид натрия',       'Sodium Hydroxide',                  false),
+  ('triethanolamine',                   'Triethanolamine',                   'Триэтаноламин',          'Triethanolamine',                   false),
+  ('amodimethicone',                    'Amodimethicone',                    'Амодиметикон',           'Amodimethicone',                    false)
+ON CONFLICT (canonical_id) DO UPDATE SET
+  inci_name  = EXCLUDED.inci_name,
+  display_ru = EXCLUDED.display_ru,
+  display_en = EXCLUDED.display_en,
+  is_junk    = EXCLUDED.is_junk;
+
+-- 2c. Properties (v3)
+INSERT INTO dm.ingredient_properties
+  (canonical_id, functions, tags, benefits_for, cautions_for, flags_avoided,
+   comedogenicity, irritancy, allergenicity, pregnancy_caution) VALUES
+  -- отдушечные аллергены
+  ('benzyl_salicylate',      '{fragrance}',                 '{fragrance,allergen}', '{}',                    '{}',          '{fragrance}', 0,1,2,false),
+  ('geraniol',               '{fragrance}',                 '{fragrance,allergen}', '{}',                    '{}',          '{fragrance}', 0,1,2,false),
+  ('alpha_isomethyl_ionone', '{fragrance}',                 '{fragrance,allergen}', '{}',                    '{}',          '{fragrance}', 0,1,2,false),
+  ('coumarin',               '{fragrance}',                 '{fragrance,allergen}', '{}',                    '{}',          '{fragrance}', 0,1,2,false),
+  ('citral',                 '{fragrance}',                 '{fragrance,allergen}', '{}',                    '{}',          '{fragrance}', 0,1,2,false),
+  -- химия краски для волос (осторожная шкала; cautions=sensitive)
+  ('toluene',                '{solvent}',                   '{color_chemistry}',    '{}',                    '{sensitive}', '{}',          0,2,1,true),
+  ('sodium_hydrosulfite',    '{color_chemistry}',           '{color_chemistry}',    '{}',                    '{sensitive}', '{}',          0,2,1,false),
+  ('diamine_sulfate',        '{hair_dye}',                  '{hair_dye}',           '{}',                    '{sensitive}', '{}',          0,2,3,false),
+  ('methylresorcinol',       '{hair_dye}',                  '{hair_dye}',           '{}',                    '{sensitive}', '{}',          0,2,2,false),
+  ('amino_hydroxytoluene',   '{hair_dye}',                  '{hair_dye}',           '{}',                    '{sensitive}', '{}',          0,2,2,false),
+  ('p_phenylenediamine',     '{hair_dye}',                  '{hair_dye}',           '{}',                    '{sensitive}', '{}',          0,2,3,false),
+  ('ethanolamine',           '{ph_adjuster}',               '{color_chemistry}',    '{}',                    '{sensitive}', '{}',          0,2,1,false),
+  ('sodium_erythorbate',     '{antioxidant}',               '{color_chemistry}',    '{}',                    '{}',          '{}',          0,0,0,false),
+  ('bht',                    '{antioxidant,preservative}',  '{antioxidant}',        '{}',                    '{}',          '{}',          1,0,1,false),
+  -- увлажнители / растворители
+  ('propanediol',            '{humectant,solvent}',         '{humectant}',          '{dryness,dehydration}', '{}',          '{}',          0,0,0,false),
+  ('pentylene_glycol',       '{humectant,solvent,preservative}','{humectant}',      '{dryness,dehydration}', '{}',          '{}',          0,0,0,false),
+  ('dipropylene_glycol',     '{humectant,solvent}',         '{humectant}',          '{dryness,dehydration}', '{}',          '{}',          0,0,0,false),
+  ('sorbitol',               '{humectant}',                 '{humectant}',          '{dryness,dehydration}', '{}',          '{}',          0,0,0,false),
+  -- протеины / аминокислоты
+  ('hydrolyzed_wheat_protein','{conditioning,hair_repair}', '{}',                   '{damaged_hair,dryness}','{}',          '{}',          0,0,1,false),
+  ('hydrolyzed_collagen',    '{conditioning,hair_repair}',  '{}',                   '{damaged_hair,dryness}','{}',          '{}',          0,0,0,false),
+  ('serine',                 '{humectant,conditioning}',    '{humectant}',          '{dryness}',             '{}',          '{}',          0,0,0,false),
+  ('glycine',                '{humectant,conditioning}',    '{humectant}',          '{dryness}',             '{}',          '{}',          0,0,0,false),
+  ('threonine',              '{humectant,conditioning}',    '{humectant}',          '{dryness}',             '{}',          '{}',          0,0,0,false),
+  ('proline',                '{humectant,conditioning}',    '{humectant}',          '{dryness}',             '{}',          '{}',          0,0,0,false),
+  -- масла-эмоленты
+  ('argan_oil',              '{emollient,occlusive}',       '{}',                   '{dryness}',             '{}',          '{}',          1,0,0,false),
+  -- загустители / плёнкообразователи / текстура
+  ('hydroxyethylcellulose',  '{thickener}',                 '{}',                   '{}',                    '{}',          '{}',          0,0,0,false),
+  ('acrylates',              '{film_former}',               '{}',                   '{}',                    '{}',          '{}',          0,0,0,false),
+  ('silica',                 '{texture,absorbent}',         '{}',                   '{}',                    '{}',          '{}',          0,0,0,false),
+  ('mica',                   '{colorant,texture}',          '{}',                   '{}',                    '{}',          '{}',          0,0,0,false),
+  ('guar_hydroxypropyltrimonium_chloride','{conditioning,thickener}','{}',          '{}',                    '{}',          '{}',          0,0,0,false),
+  -- ПАВ / эмульгаторы
+  ('trideceth',              '{surfactant,emulsifier}',     '{}',                   '{}',                    '{}',          '{}',          0,1,0,false),
+  ('cocamide_mea',           '{surfactant}',                '{}',                   '{}',                    '{}',          '{}',          0,1,1,false),
+  ('cocamide_dea',           '{surfactant}',                '{}',                   '{}',                    '{}',          '{}',          0,2,1,false),
+  ('peg',                    '{humectant,solvent,emulsifier}','{}',                 '{}',                    '{}',          '{}',          0,0,0,false),
+  ('peg_stearate',           '{emulsifier,surfactant}',     '{}',                   '{}',                    '{}',          '{}',          1,0,0,false),
+  ('behentrimonium_chloride','{conditioning,surfactant}',   '{}',                   '{}',                    '{}',          '{}',          0,1,1,false),
+  -- pH-корректоры
+  ('sodium_hydroxide',       '{ph_adjuster}',               '{}',                   '{}',                    '{sensitive}', '{}',          0,2,0,false),
+  ('triethanolamine',        '{ph_adjuster,emulsifier}',    '{}',                   '{}',                    '{sensitive}', '{}',          0,1,1,false),
+  -- силикон
+  ('amodimethicone',         '{emollient,conditioning,silicone}','{}',              '{}',                    '{}',          '{}',          1,0,0,false)
+ON CONFLICT (canonical_id) DO UPDATE SET
+  functions         = EXCLUDED.functions,
+  tags              = EXCLUDED.tags,
+  benefits_for      = EXCLUDED.benefits_for,
+  cautions_for      = EXCLUDED.cautions_for,
+  flags_avoided     = EXCLUDED.flags_avoided,
+  comedogenicity    = EXCLUDED.comedogenicity,
+  irritancy         = EXCLUDED.irritancy,
+  allergenicity     = EXCLUDED.allergenicity,
+  pregnancy_caution = EXCLUDED.pregnancy_caution;
+
+-- 3c. Aliases (v3)
+INSERT INTO dm.ingredient_aliases (alias_norm, canonical_id, lang, source)
+SELECT n, cid, lang, 'seed'
+FROM (
+  SELECT dm.norm_ingredient_alias(a) AS n, cid, lang
+  FROM (VALUES
+    -- fragrance allergens
+    ('benzyl salicylate','benzyl_salicylate','en'), ('бензилсалицилат','benzyl_salicylate','ru'),
+    ('бензил салицилат','benzyl_salicylate','ru'),
+    ('geraniol','geraniol','en'), ('гераниол','geraniol','ru'),
+    ('alpha isomethyl ionone','alpha_isomethyl_ionone','en'), ('isomethyl ionone','alpha_isomethyl_ionone','en'),
+    ('альфа изометил ионон','alpha_isomethyl_ionone','ru'),
+    ('coumarin','coumarin','en'), ('кумарин','coumarin','ru'),
+    ('citral','citral','en'), ('цитраль','citral','ru'),
+    -- hair dye / color chemistry
+    ('toluene','toluene','en'), ('толуол','toluene','ru'),
+    ('sodium hydrosulfite','sodium_hydrosulfite','en'), ('sodium dithionite','sodium_hydrosulfite','en'),
+    ('гидросульфит натрия','sodium_hydrosulfite','ru'),
+    ('diamine sulfate','diamine_sulfate','en'), ('toluene diamine','diamine_sulfate','en'),
+    ('toluene diamine sulfate','diamine_sulfate','en'), ('диамин сульфат','diamine_sulfate','ru'),
+    ('methylresorcinol','methylresorcinol','en'), ('метилрезорцин','methylresorcinol','ru'),
+    ('amino hydroxytoluene','amino_hydroxytoluene','en'), ('аминогидрокситолуол','amino_hydroxytoluene','ru'),
+    ('p phenylenediamine','p_phenylenediamine','en'), ('phenylenediamine','p_phenylenediamine','en'),
+    ('ppd','p_phenylenediamine','en'), ('парафенилендиамин','p_phenylenediamine','ru'),
+    ('ethanolamine','ethanolamine','en'), ('этаноламин','ethanolamine','ru'),
+    ('sodium erythorbate','sodium_erythorbate','en'), ('эриторбат натрия','sodium_erythorbate','ru'),
+    ('bht','bht','en'), ('butylated hydroxytoluene','bht','en'), ('бутилгидрокситолуол','bht','ru'),
+    -- humectants / solvents
+    ('propanediol','propanediol','en'), ('пропандиол','propanediol','ru'),
+    ('pentylene glycol','pentylene_glycol','en'), ('пентиленгликоль','pentylene_glycol','ru'),
+    ('dipropylene glycol','dipropylene_glycol','en'), ('дипропиленгликоль','dipropylene_glycol','ru'),
+    ('sorbitol','sorbitol','en'), ('сорбитол','sorbitol','ru'),
+    -- proteins / amino acids
+    ('hydrolyzed wheat protein','hydrolyzed_wheat_protein','en'),
+    ('гидролизованный пшеничный протеин','hydrolyzed_wheat_protein','ru'),
+    ('гидролизат пшеничного белка','hydrolyzed_wheat_protein','ru'),
+    ('hydrolyzed collagen','hydrolyzed_collagen','en'), ('гидролизованный коллаген','hydrolyzed_collagen','ru'),
+    ('коллаген','hydrolyzed_collagen','ru'),
+    ('serine','serine','en'), ('серин','serine','ru'),
+    ('glycine','glycine','en'), ('глицин','glycine','ru'),
+    ('threonine','threonine','en'), ('треонин','threonine','ru'),
+    ('proline','proline','en'), ('пролин','proline','ru'),
+    -- oils / butters
+    ('argania spinosa kernel oil','argan_oil','en'), ('argania spinosa oil','argan_oil','en'),
+    ('argan oil','argan_oil','en'), ('масло арганы','argan_oil','ru'), ('аргановое масло','argan_oil','ru'),
+    ('масло аргании','argan_oil','ru'),
+    ('butyrospermum parkii shea butter','shea_butter','en'), ('butyrospermum parkii','shea_butter','en'),
+    ('ши','shea_butter','ru'),
+    -- thickeners / film-formers / texture
+    ('hydroxyethylcellulose','hydroxyethylcellulose','en'), ('hydroxyethyl cellulose','hydroxyethylcellulose','en'),
+    ('гидроксиэтилцеллюлоза','hydroxyethylcellulose','ru'),
+    ('acrylates','acrylates','en'), ('acrylates copolymer','acrylates','en'),
+    ('acrylates crosspolymer','acrylates','en'), ('акрилаты','acrylates','ru'),
+    ('silica','silica','en'), ('диоксид кремния','silica','ru'), ('кремнезем','silica','ru'),
+    ('mica','mica','en'), ('слюда','mica','ru'),
+    ('guar hydroxypropyltrimonium chloride','guar_hydroxypropyltrimonium_chloride','en'),
+    ('гуар гидроксипропилтримония хлорид','guar_hydroxypropyltrimonium_chloride','ru'),
+    -- surfactants / emulsifiers
+    ('trideceth','trideceth','en'), ('тридецет','trideceth','ru'),
+    ('cocamide mea','cocamide_mea','en'), ('кокамид меа','cocamide_mea','ru'),
+    ('cocamide dea','cocamide_dea','en'), ('кокамид деа','cocamide_dea','ru'),
+    ('peg','peg','en'), ('пэг','peg','ru'),
+    ('peg stearate','peg_stearate','en'), ('пэг стеарат','peg_stearate','ru'),
+    ('behentrimonium chloride','behentrimonium_chloride','en'), ('бегентримония хлорид','behentrimonium_chloride','ru'),
+    -- pH adjusters
+    ('sodium hydroxide','sodium_hydroxide','en'), ('гидроксид натрия','sodium_hydroxide','ru'),
+    ('каустическая сода','sodium_hydroxide','ru'),
+    ('triethanolamine','triethanolamine','en'), ('триэтаноламин','triethanolamine','ru'),
+    -- silicone
+    ('amodimethicone','amodimethicone','en'), ('амодиметикон','amodimethicone','ru')
+  ) AS v(a, cid, lang)
+) s
+WHERE s.n IS NOT NULL
+ON CONFLICT (alias_norm) DO NOTHING;
+
 -- ─────────────────────────── 4. Sanity ────────────────────────────────────────
 DO $sanity$
 DECLARE c_canon int; c_alias int; c_prop int;
@@ -472,6 +673,11 @@ BEGIN
   -- жирный спирт НЕ помечается как сушащий (иначе ложный has_drying_alcohol):
   ASSERT NOT ('alcohol_drying' = ANY(
     (SELECT tags FROM dm.ingredient_properties WHERE canonical_id = 'cetearyl_alcohol')));
+  -- v3 coverage:
+  ASSERT (SELECT canonical_id FROM dm.ingredient_aliases WHERE alias_norm = dm.norm_ingredient_alias('масло ши')) = 'shea_butter';
+  ASSERT (SELECT canonical_id FROM dm.ingredient_aliases WHERE alias_norm = dm.norm_ingredient_alias('benzyl salicylate')) = 'benzyl_salicylate';
+  ASSERT (SELECT canonical_id FROM dm.ingredient_aliases WHERE alias_norm = dm.norm_ingredient_alias('alpha-isomethyl ionone')) = 'alpha_isomethyl_ionone';
+  ASSERT (SELECT canonical_id FROM dm.ingredient_aliases WHERE alias_norm = dm.norm_ingredient_alias('p-phenylenediamine')) = 'p_phenylenediamine';
   RAISE NOTICE 'seed sanity: OK';
 END
 $sanity$;
