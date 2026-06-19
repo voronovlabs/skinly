@@ -1,18 +1,21 @@
 /**
- * Smoke-тест data-access слоя DM compatibility (Stage 2, шаг 2).
+ * Smoke-тест DM compatibility pipeline по когортам (Stage 2, шаг 3).
  *
  * Требует рабочую БД (DATABASE_URL) с применёнными dm-объектами и
- * сгенерированный Prisma client. Ничего не подключает к API/UI.
+ * сгенерированный Prisma client. Ничего не подключает к API/UI и НЕ включает
+ * prisma query-логи (использует общий клиент из @/lib/prisma как есть).
  *
  * Запуск:
  *   npx tsx scripts/smoke-dm-products.ts
  *
- * Делает:
- *   1) берёт несколько barcode из dm.product_ingredient_features (recognized_ratio >= 0.3);
- *   2) getDmCompatibilityInput(barcode);
- *   3) featuresToFacts(rows);
- *   4) evaluateCompatibility(profile, facts) на тестовом профиле;
- *   5) печатает barcode | productName | recognizedRatio | facts.length | score | verdict.
+ * Когорты выборки:
+ *   3 × has_fragrance · 3 × has_acids · 3 × has_retinoids
+ *   3 × category 'Лицо' · 3 × category 'Волосы'
+ *   3 × random (recognized_ratio 0.3..0.8)
+ *
+ * Для каждого товара печатает:
+ *   cohort | barcode | category | productName | recognizedRatio |
+ *   totalIngredients | facts.length | top canonical ids | score | verdict | lowConfidence
  */
 
 import { Prisma } from "@prisma/client";
@@ -33,38 +36,78 @@ const profile = summaryProfileToEngine({
   goal: "hydration",
 });
 
-async function main() {
-  const sample = await prisma.$queryRaw<{ barcode: string }[]>(Prisma.sql`
-    SELECT barcode
-    FROM dm.product_ingredient_features
-    WHERE recognized_ratio >= 0.3 AND barcode IS NOT NULL
-    ORDER BY recognized_ratio DESC
-    LIMIT 8
-  `);
+interface CohortRow {
+  cohort: string;
+  barcode: string;
+}
 
-  if (sample.length === 0) {
-    console.log("Нет товаров с recognized_ratio >= 0.3 — проверь dm-объекты.");
+async function selectCohorts(): Promise<CohortRow[]> {
+  return prisma.$queryRaw<CohortRow[]>(Prisma.sql`
+    SELECT DISTINCT ON (barcode) cohort, barcode FROM (
+      (SELECT 'fragrance'  AS cohort, f.barcode FROM dm.product_ingredient_features f
+         WHERE f.has_fragrance  AND f.barcode IS NOT NULL ORDER BY random() LIMIT 3)
+      UNION ALL
+      (SELECT 'acids'      AS cohort, f.barcode FROM dm.product_ingredient_features f
+         WHERE f.has_acids      AND f.barcode IS NOT NULL ORDER BY random() LIMIT 3)
+      UNION ALL
+      (SELECT 'retinoids'  AS cohort, f.barcode FROM dm.product_ingredient_features f
+         WHERE f.has_retinoids  AND f.barcode IS NOT NULL ORDER BY random() LIMIT 3)
+      UNION ALL
+      (SELECT 'cat:Лицо'   AS cohort, p.barcode FROM dm.dm_products p
+         JOIN dm.product_ingredient_features f USING (business_key)
+         WHERE p.category = 'Лицо'   AND p.barcode IS NOT NULL ORDER BY random() LIMIT 3)
+      UNION ALL
+      (SELECT 'cat:Волосы' AS cohort, p.barcode FROM dm.dm_products p
+         JOIN dm.product_ingredient_features f USING (business_key)
+         WHERE p.category = 'Волосы' AND p.barcode IS NOT NULL ORDER BY random() LIMIT 3)
+      UNION ALL
+      (SELECT 'random'     AS cohort, f.barcode FROM dm.product_ingredient_features f
+         WHERE f.recognized_ratio BETWEEN 0.3 AND 0.8 AND f.barcode IS NOT NULL
+         ORDER BY random() LIMIT 3)
+    ) s
+  `);
+}
+
+async function main() {
+  const cohorts = await selectCohorts();
+  if (cohorts.length === 0) {
+    console.log("Нет подходящих товаров — проверь dm-объекты / refresh MV.");
     return;
   }
 
   console.log(
-    "barcode | productName | recognizedRatio | facts | score | verdict",
+    "cohort | barcode | category | productName | recRatio | total | facts | topCanonical | score | verdict | lowConf",
   );
-  console.log("-".repeat(80));
+  console.log("-".repeat(110));
 
-  for (const { barcode } of sample) {
+  for (const { cohort, barcode } of cohorts) {
     const input = await getDmCompatibilityInput(barcode);
     if (!input) {
-      console.log(`${barcode} | <не найден>`);
+      console.log(`${cohort} | ${barcode} | <не найден в DM>`);
       continue;
     }
     const facts = featuresToFacts(input.rows);
     const result = evaluateCompatibility(profile, facts);
-    const name = (input.product.productName ?? "—").slice(0, 32);
+    const top = input.rows
+      .slice(0, 5)
+      .map((r) => r.canonical_id)
+      .join(",");
+    const name = (input.product.productName ?? "—").slice(0, 28);
+
     console.log(
-      `${barcode} | ${name} | ${input.recognizedRatio.toFixed(3)} | ` +
-        `${facts.length} | ${result.score} | ${result.verdict}` +
-        `${input.lowConfidence ? " (low-conf)" : ""}`,
+      [
+        cohort,
+        barcode,
+        input.product.category ?? "—",
+        name,
+        input.recognizedRatio.toFixed(3),
+        input.totalIngredients,
+        facts.length,
+        top || "—",
+        result.score,
+        result.verdict,
+        input.lowConfidence ? "yes" : "no",
+      ].join(" | "),
     );
   }
 }

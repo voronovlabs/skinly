@@ -5,11 +5,10 @@ import {
   type ProductListItem,
 } from "@/lib/db/repositories/product";
 import {
-  evaluateCompatibility,
-  inciToFact,
   summaryProfileToEngine,
   type SkinProfileSummaryLike,
 } from "@/lib/compatibility";
+import { resolveCompatibilityBatch } from "@/lib/compatibility/resolve-compatibility";
 import { apiError, apiJson, apiPreflight } from "@/lib/api/respond";
 
 /**
@@ -111,17 +110,22 @@ export async function GET(req: NextRequest) {
     // Локальный scoring для forMe — та же логика, что и в
     // app/actions/catalog.ts#fetchCatalogPageAction.
     const engineProfile = summaryProfileToEngine(profile);
-    const scored: ProductListItem[] = page.items.map((item) => {
-      const inci = item.inciList;
-      if (!inci?.length) {
-        return { ...strip(item), score: null, verdict: null };
-      }
-      const facts = inci.map((l) => inciToFact(l.inci, l.position));
-      const result = evaluateCompatibility(engineProfile, facts);
+    // Flag-gated: DM-путь при USE_DM_COMPATIBILITY=true, иначе legacy. Batch —
+    // один запрос на страницу (без N+1). DTO ответа не меняется.
+    const resolved = await resolveCompatibilityBatch(
+      engineProfile,
+      page.items.map((item) => ({
+        barcode: item.barcode,
+        legacyIngredients: item.inciList ?? [],
+      })),
+    );
+    const scored: ProductListItem[] = page.items.map((item, i) => {
+      const r = resolved[i];
+      const hasFacts = r.facts.length > 0;
       return {
         ...strip(item),
-        score: result.score,
-        verdict: result.verdict,
+        score: hasFacts ? r.result.score : null,
+        verdict: hasFacts ? r.result.verdict : null,
       };
     });
     scored.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));

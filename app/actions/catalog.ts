@@ -6,11 +6,10 @@ import {
   type ProductListPage,
 } from "@/lib/db/repositories/product";
 import {
-  evaluateCompatibility,
-  inciToFact,
   summaryProfileToEngine,
   type SkinProfileSummaryLike,
 } from "@/lib/compatibility";
+import { resolveCompatibilityBatch } from "@/lib/compatibility/resolve-compatibility";
 import { prisma } from "@/lib/prisma";
 import { dbProductToDisplay } from "@/lib/db/display";
 import type { Product } from "@/lib/types";
@@ -53,11 +52,22 @@ export async function fetchCatalogPageAction(params: {
 
     const engineProfile = summaryProfileToEngine(params.forMe);
 
-    const scored: ProductListItem[] = page.items.map((item) => {
-      if (!item.inciList?.length) return { ...item, score: null, verdict: null };
-      const facts = item.inciList.map((l) => inciToFact(l.inci, l.position));
-      const result = evaluateCompatibility(engineProfile, facts);
-      return { ...item, score: result.score, verdict: result.verdict };
+    // Flag-gated DM-путь (batch, без N+1); при выключенном флаге — legacy.
+    const resolved = await resolveCompatibilityBatch(
+      engineProfile,
+      page.items.map((item) => ({
+        barcode: item.barcode,
+        legacyIngredients: item.inciList ?? [],
+      })),
+    );
+    const scored: ProductListItem[] = page.items.map((item, i) => {
+      const r = resolved[i];
+      const hasFacts = r.facts.length > 0;
+      return {
+        ...item,
+        score: hasFacts ? r.result.score : null,
+        verdict: hasFacts ? r.result.verdict : null,
+      };
     });
 
     scored.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));

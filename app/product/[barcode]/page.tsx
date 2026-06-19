@@ -15,10 +15,13 @@ import type { Prisma } from "@prisma/client";
 import { getCurrentUser } from "@/lib/auth";
 import { getBeautyProfileByUserId } from "@/lib/db/repositories/beauty-profile";
 import {
+  emptyProfile,
   inciToFact,
+  summaryProfileToEngine,
   type IngredientFact,
   type SkinProfileSummaryLike,
 } from "@/lib/compatibility";
+import { resolveCompatibility } from "@/lib/compatibility/resolve-compatibility";
 
 /**
  * /product/<id-or-barcode>
@@ -250,9 +253,19 @@ async function DbProductView({
       ? product.category.replace(/_/g, " ").toLowerCase()
       : null;
 
-  const facts: IngredientFact[] = product.ingredients.map((l) =>
-    inciToFact(l.ingredient.inci, l.position),
-  );
+  // Flag-gated: DM-путь для реальных товаров с barcode, иначе legacy
+  // (inciToFact). Берём только facts — клиентские компоненты пересчитывают
+  // result под профиль сами. UI и mock-ветка не меняются.
+  const { facts } = await resolveCompatibility({
+    barcode: product.barcode,
+    legacyIngredients: product.ingredients.map((l) => ({
+      inci: l.ingredient.inci,
+      position: l.position,
+    })),
+    profile: serverProfile
+      ? summaryProfileToEngine(serverProfile)
+      : emptyProfile(),
+  });
 
   const items: IngredientsListItem[] = product.ingredients.map((l) => ({
     id: `${product.id}_${l.ingredientId}`,
