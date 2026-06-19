@@ -21,11 +21,8 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getDmCompatibilityInput } from "@/lib/db/repositories/dm-products";
-import {
-  evaluateCompatibility,
-  featuresToFacts,
-  summaryProfileToEngine,
-} from "@/lib/compatibility";
+import { summaryProfileToEngine } from "@/lib/compatibility";
+import { resolveCompatibility } from "@/lib/compatibility/resolve-compatibility";
 
 // Тестовый профиль: сухая, очень чувствительная кожа, избегает отдушек.
 const profile = summaryProfileToEngine({
@@ -76,9 +73,12 @@ async function main() {
   }
 
   console.log(
-    "cohort | barcode | category | productName | recRatio | total | facts | topCanonical | score | verdict | lowConf",
+    "cohort | barcode | category | productName | recRatio | total | source | facts | topCanonical | score | verdict | lowConf",
   );
-  console.log("-".repeat(110));
+  console.log("-".repeat(120));
+
+  let dmCount = 0;
+  let legacyCount = 0;
 
   for (const { cohort, barcode } of cohorts) {
     const input = await getDmCompatibilityInput(barcode);
@@ -86,13 +86,29 @@ async function main() {
       console.log(`${cohort} | ${barcode} | <не найден в DM>`);
       continue;
     }
-    const facts = featuresToFacts(input.rows);
-    const result = evaluateCompatibility(profile, facts);
+
+    // Прогоняем через тот же резолвер, что и приложение: он применит порог
+    // recognizedRatio >= 0.3 и решит — отдавать DM или откатиться на legacy.
+    // legacyIngredients пуст: для валидного DM-товара это неважно (берётся
+    // DM-состав); отбракованный DM покажет source=legacy (явно ненадёжный).
+    const resolved = await resolveCompatibility({
+      barcode,
+      legacyIngredients: [],
+      profile,
+      forceDm: true,
+      dmInput: input,
+    });
+
     const top = input.rows
       .slice(0, 5)
       .map((r) => r.canonical_id)
       .join(",");
     const name = (input.product.productName ?? "—").slice(0, 28);
+    const sourceLabel =
+      resolved.source === "legacy" ? "LEGACY(DM rejected)" : "dm";
+
+    if (resolved.source === "dm") dmCount++;
+    else legacyCount++;
 
     console.log(
       [
@@ -102,14 +118,18 @@ async function main() {
         name,
         input.recognizedRatio.toFixed(3),
         input.totalIngredients,
-        facts.length,
+        sourceLabel,
+        resolved.facts.length,
         top || "—",
-        result.score,
-        result.verdict,
+        resolved.result.score,
+        resolved.result.verdict,
         input.lowConfidence ? "yes" : "no",
       ].join(" | "),
     );
   }
+
+  console.log("-".repeat(120));
+  console.log(`source: dm=${dmCount}  legacy(fallback)=${legacyCount}`);
 }
 
 main()

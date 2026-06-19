@@ -57,6 +57,25 @@ export interface ResolveCompatibilityResult {
   lowConfidence?: boolean;
 }
 
+/**
+ * Минимальная доля распознанных ингредиентов, при которой DM-результат можно
+ * отдавать. Ниже — DM считается ненадёжным (например, recognizedRatio=0 с
+ * пустыми facts), и мы откатываемся на legacy. Совпадает с порогом
+ * lowConfidence в репозитории.
+ */
+const MIN_DM_RECOGNIZED_RATIO = 0.3;
+
+/** DM-вход пригоден к использованию (есть состав и распознано достаточно). */
+function isUsableDmInput(
+  dm: DmCompatibilityInput | null | undefined,
+): dm is DmCompatibilityInput {
+  return (
+    !!dm &&
+    dm.rows.length > 0 &&
+    dm.recognizedRatio >= MIN_DM_RECOGNIZED_RATIO
+  );
+}
+
 function legacyResult(
   args: ResolveCompatibilityArgs,
 ): ResolveCompatibilityResult {
@@ -98,7 +117,9 @@ export async function resolveCompatibility(
         args.dmInput !== undefined
           ? args.dmInput
           : await getDmCompatibilityInput(args.barcode);
-      if (dm && dm.rows.length > 0) return dmResult(dm, args.profile);
+      // DM используем только если он есть, в нём есть состав И распознано
+      // достаточно (recognizedRatio >= 0.3). Иначе — legacy.
+      if (isUsableDmInput(dm)) return dmResult(dm, args.profile);
     } catch (e) {
       console.error(
         "[resolveCompatibility] DM path failed, fallback to legacy:",
@@ -148,6 +169,8 @@ export async function resolveCompatibilityBatch(
         profile,
         forceDm: useDm,
         // null = «уже искали в batch, нет» → без повторного запроса.
+        // Порог recognizedRatio применяется в resolveCompatibility поштучно,
+        // поэтому товары с пустым/слабым DM падают на legacy индивидуально.
         dmInput: useDm && it.barcode ? dmMap.get(it.barcode) ?? null : undefined,
       }),
     ),
