@@ -52,3 +52,12 @@ export {
 export type { SkinProfileSummaryLike } from "./adapters";
 
 export { recognitionRatio } from "./ingredients";
+
+// Stage 2 — DM canonical-layer adapter (pure; пока не подключён к API/UI).
+export {
+  deriveBaseSafety,
+  dmRowToFact,
+  featuresToFacts,
+} from "./dm-adapters";
+
+export type { DmIngredientRow } from "./dm-adapters";
