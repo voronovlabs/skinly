@@ -44,6 +44,7 @@ interface RawSeed {
   brand: string | null;
   category: string;
   cset: string[];
+  recognized_ratio: number;
   has_fragrance: boolean;
   has_essential_oils: boolean;
   has_drying_alcohol: boolean;
@@ -57,6 +58,7 @@ export async function getRecoSeed(barcode: string): Promise<SeedRow | null> {
       p.business_key, p.barcode, p.brand_normalized AS brand, p.category,
       ARRAY(SELECT e->>'canonical_id'
             FROM jsonb_array_elements(f.canonical_ingredients) e) AS cset,
+      f.recognized_ratio::float8 AS recognized_ratio,
       f.has_fragrance, f.has_essential_oils, f.has_drying_alcohol, f.irritancy_max
     FROM dm.dm_products p
     JOIN dm.product_ingredient_features f USING (business_key)
@@ -71,6 +73,7 @@ export async function getRecoSeed(barcode: string): Promise<SeedRow | null> {
     brand: r.brand,
     category: r.category,
     cset: r.cset ?? [],
+    recognizedRatio: r.recognized_ratio,
     has_fragrance: r.has_fragrance,
     has_essential_oils: r.has_essential_oils,
     has_drying_alcohol: r.has_drying_alcohol,

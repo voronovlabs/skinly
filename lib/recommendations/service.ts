@@ -5,7 +5,13 @@
  *      profile-режим (нет barcode): топ по качеству/распознанности.
  *   2. compatibility для пула считаем через DM-вход (getDmCompatibilityInputs)
  *      + featuresToFacts + evaluateCompatibility — тем же движком, что и web.
- *   3. recommendation_score (формула MVP) → сортировка → top-N.
+ *   3. recommendation_score (формула MVP) → hard compatibility-gate → top-N.
+ *
+ * Защиты:
+ *   - low_seed_confidence: если seed.recognized_ratio < 0.3, overlap слабый →
+ *     режем его вес (в score.ts) и не врём в reasons.
+ *   - hard compatibility-gate: при наличии профиля не отдаём кандидатов с
+ *     compatibilityScore < 60 (fallback 50, затем — без gate, если совсем мало).
  *
  * Импортируется только серверным route-handler'ом. Без ML/embeddings.
  */
@@ -37,6 +43,16 @@ import type {
 const POOL_SIZE = 150;
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 30;
+const LOW_SEED_CONFIDENCE = 0.3;
+const COMPAT_GATE = 60;
+const COMPAT_GATE_FALLBACK = 50;
+const MIN_AFTER_GATE = 3;
+
+interface ScoredCandidate {
+  item: RecommendationItem;
+  recScore: number;
+  compatScoreRaw: number; // 0..100 (0 = нет данных)
+}
 
 export async function getRecommendations(
   params: RecommendationsParams,
@@ -46,9 +62,13 @@ export async function getRecommendations(
     Math.min(Number.isFinite(params.limit) ? params.limit : DEFAULT_LIMIT, MAX_LIMIT),
   );
   const engineProfile = summaryProfileToEngine(params.profile ?? null);
+  const profileProvided = params.profile != null;
 
   let seed: SeedRow | null = null;
   if (params.barcode) seed = await getRecoSeed(params.barcode);
+
+  const lowSeedConfidence =
+    !!seed && seed.recognizedRatio < LOW_SEED_CONFIDENCE;
 
   const candidates: CandidateRow[] =
     seed && seed.cset.length > 0
@@ -56,17 +76,27 @@ export async function getRecommendations(
       : await getRecoProfileCandidates(POOL_SIZE);
 
   if (candidates.length === 0) {
-    debugLog(params, seed, candidates, 0);
+    debugLog({
+      params,
+      seed,
+      lowSeedConfidence,
+      candidates,
+      beforeCompatibilityGate: 0,
+      afterCompatibilityGate: 0,
+      fallbackUsed: false,
+      finalCount: 0,
+    });
     return [];
   }
 
   // Compatibility одним запросом за весь пул (без N+1).
   const dmInputs = await getDmCompatibilityInputs(candidates.map((c) => c.barcode));
 
-  const scored = candidates.map((c) => {
+  const scored: ScoredCandidate[] = candidates.map((c) => {
     const dm = dmInputs.get(c.barcode);
     const facts = dm ? featuresToFacts(dm.rows) : [];
     const compat = evaluateCompatibility(engineProfile, facts);
+    const compatScoreRaw = compat.score; // 0 = пустой профиль / нет состава
     const risk = computeRiskPenalty(
       params.profile ?? null,
       c,
@@ -79,9 +109,10 @@ export async function getRecommendations(
       seedSetSize: seed?.cset.length ?? 0,
       qualityScore: c.quality_score,
       recognizedRatio: c.recognized_ratio,
-      compatibilityScore: compat.score,
+      compatibilityScore: compatScoreRaw,
       riskPenalty: risk,
       sameBrand,
+      lowSeedConfidence,
     });
 
     const item: RecommendationItem = {
@@ -91,37 +122,80 @@ export async function getRecommendations(
       category: c.category,
       imageUrl: c.image_url,
       recommendationScore: Math.round(recScore * 100),
-      compatibilityScore: compat.score > 0 ? compat.score : null,
-      reasons: buildReasons({ seed, cand: c, profile: params.profile ?? null }),
+      compatibilityScore: compatScoreRaw > 0 ? compatScoreRaw : null,
+      reasons: buildReasons({
+        seed,
+        cand: c,
+        profile: params.profile ?? null,
+        lowSeedConfidence,
+        compatibilityScore: compatScoreRaw,
+        riskPenalty: risk,
+      }),
     };
-    return { item, recScore };
+    return { item, recScore, compatScoreRaw };
   });
 
-  scored.sort((a, b) => b.recScore - a.recScore);
-  const top = scored.slice(0, limit).map((s) => s.item);
+  // Hard compatibility-gate (только при наличии профиля).
+  const beforeCompatibilityGate = scored.length;
+  let gated = scored;
+  let fallbackUsed = false;
+  if (profileProvided) {
+    const strict = scored.filter((s) => s.compatScoreRaw >= COMPAT_GATE);
+    if (strict.length >= MIN_AFTER_GATE) {
+      gated = strict;
+    } else {
+      const relaxed = scored.filter((s) => s.compatScoreRaw >= COMPAT_GATE_FALLBACK);
+      fallbackUsed = true;
+      // Совсем мало даже на 50 → не режем (но reasons не врут: «Подходит по
+      // профилю» добавляется только при compat >= 75).
+      gated = relaxed.length >= MIN_AFTER_GATE ? relaxed : scored;
+    }
+  }
+  const afterCompatibilityGate = gated.length;
 
-  debugLog(params, seed, candidates, top.length);
+  gated.sort((a, b) => b.recScore - a.recScore);
+  const top = gated.slice(0, limit).map((s) => s.item);
+
+  debugLog({
+    params,
+    seed,
+    lowSeedConfidence,
+    candidates,
+    beforeCompatibilityGate,
+    afterCompatibilityGate,
+    fallbackUsed,
+    finalCount: top.length,
+  });
   return top;
 }
 
-function debugLog(
-  params: RecommendationsParams,
-  seed: SeedRow | null,
-  candidates: CandidateRow[],
-  finalCount: number,
-): void {
+function debugLog(d: {
+  params: RecommendationsParams;
+  seed: SeedRow | null;
+  lowSeedConfidence: boolean;
+  candidates: CandidateRow[];
+  beforeCompatibilityGate: number;
+  afterCompatibilityGate: number;
+  fallbackUsed: boolean;
+  finalCount: number;
+}): void {
   if (process.env.RECO_DEBUG !== "1") return;
-  const topOverlap = candidates.reduce((m, c) => Math.max(m, c.overlap), 0);
+  const topOverlap = d.candidates.reduce((m, c) => Math.max(m, c.overlap), 0);
   // eslint-disable-next-line no-console
   console.log(
-    `[reco] seed=${params.barcode ?? "—"} mode=${seed ? "seed" : "profile"} ` +
-      `candidatesAfterGates=${candidates.length} topOverlap=${topOverlap} final=${finalCount}`,
+    `[reco] seed=${d.params.barcode ?? "—"} mode=${d.seed ? "seed" : "profile"} ` +
+      `seedRecognizedRatio=${d.seed ? d.seed.recognizedRatio.toFixed(4) : "—"} ` +
+      `lowSeedConfidence=${d.lowSeedConfidence} ` +
+      `candidatesAfterGates=${d.candidates.length} topOverlap=${topOverlap} ` +
+      `beforeCompatibilityGate=${d.beforeCompatibilityGate} ` +
+      `afterCompatibilityGate=${d.afterCompatibilityGate} ` +
+      `fallbackUsed=${d.fallbackUsed} final=${d.finalCount}`,
   );
-  if (seed) {
-    void getRecoDebugCounts(seed).then((d) => {
+  if (d.seed) {
+    void getRecoDebugCounts(d.seed).then((c) => {
       // eslint-disable-next-line no-console
       console.log(
-        `[reco] candidatesBeforeGates=${d.beforeGates} candidatesAfterGates=${d.afterGates}`,
+        `[reco] candidatesBeforeGates=${c.beforeGates} candidatesAfterGates=${c.afterGates}`,
       );
     });
   }

@@ -34,6 +34,8 @@ export interface SeedRow {
   brand: string | null;
   category: string;
   cset: string[]; // canonical_id'шники состава
+  /** 0..1 — насколько надёжен состав seed'а. < 0.3 → low confidence. */
+  recognizedRatio: number;
   has_fragrance: boolean;
   has_essential_oils: boolean;
   has_drying_alcohol: boolean;
