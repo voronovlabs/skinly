@@ -29,3 +29,6 @@ export type { IngredientsListItem, IngredientsListProps } from "./ingredients-li
 
 export { LiveMatchBadge } from "./live-match-badge";
 export type { LiveMatchBadgeProps } from "./live-match-badge";
+
+export { SimilarProducts } from "./similar-products";
+export type { SimilarProductsProps } from "./similar-products";

@@ -7,6 +7,7 @@ import {
   IngredientsList,
   ProductActionBar,
   ProductCompatibilitySection,
+  SimilarProducts,
   type IngredientsListItem,
 } from "@/components/product";
 import { findProductByBarcode } from "@/lib/mock";
@@ -212,6 +213,14 @@ export default async function ProductAnalysisPage({
           />
         </section>
 
+        <section className="px-6 mt-10">
+          <SimilarProducts
+            barcode={mock.barcode}
+            mode={session.mode}
+            serverProfile={session.serverProfile}
+          />
+        </section>
+
         <ProductActionBar
           product={{ id: mock.id }}
           scoringContext={{
@@ -350,6 +359,14 @@ async function DbProductView({
             serverProfile={serverProfile}
           />
         )}
+      </section>
+
+      <section className="px-6 mt-10">
+        <SimilarProducts
+          barcode={product.barcode}
+          mode={mode}
+          serverProfile={serverProfile}
+        />
       </section>
 
       <ProductActionBar
