@@ -11,7 +11,27 @@
  */
 
 import type { SkinProfileSummaryLike } from "@/lib/compatibility";
-import type { CandidateRow, SeedRow } from "./types";
+import type {
+  CandidateRow,
+  Confidence,
+  RecommendationType,
+  SeedRow,
+} from "./types";
+
+/**
+ * Классификация по compatibilityScore (raw 0..100):
+ *   >= 75 → high / strong
+ *   >= 60 → medium / strong
+ *   <  60 → low / fallback
+ */
+export function classifyRecommendation(compatScore: number): {
+  confidence: Confidence;
+  recommendationType: RecommendationType;
+} {
+  if (compatScore >= 75) return { confidence: "high", recommendationType: "strong" };
+  if (compatScore >= 60) return { confidence: "medium", recommendationType: "strong" };
+  return { confidence: "low", recommendationType: "fallback" };
+}
 
 const W_NORMAL = {
   overlap: 0.35,
@@ -116,9 +136,18 @@ export function buildReasons(args: {
   lowSeedConfidence: boolean;
   compatibilityScore: number; // raw 0..100
   riskPenalty: number; // 0..1
+  recommendationType: RecommendationType;
 }): string[] {
-  const { seed, cand, profile, lowSeedConfidence, compatibilityScore, riskPenalty } =
-    args;
+  const {
+    seed,
+    cand,
+    profile,
+    lowSeedConfidence,
+    compatibilityScore,
+    riskPenalty,
+    recommendationType,
+  } = args;
+  const isStrong = recommendationType === "strong";
   const out: string[] = [];
 
   // Похожий состав — только если seed надёжен и overlap реальный.
@@ -129,17 +158,22 @@ export function buildReasons(args: {
   if (seed && lowSeedConfidence) {
     out.push("Ограниченная уверенность по составу");
   }
-  // Подходит по профилю — только при высоком compat.
-  if (compatibilityScore >= 75) {
+  // Fallback (low) — честно помечаем как альтернативу той же категории.
+  if (!isStrong && seed) {
+    out.push("Альтернатива из той же категории");
+  }
+  // Подходит по профилю — только для strong при высоком compat.
+  if (isStrong && compatibilityScore >= 75) {
     out.push("Подходит по профилю");
   }
 
   const avoidsFragrance = profile?.avoidedList?.includes("fragrance");
   if (avoidsFragrance && !cand.has_fragrance) out.push("Без отдушки");
 
-  // Чувствительная кожа — только если реально хорошо подходит и риск низкий.
+  // Чувствительная кожа — только для strong при высоком compat и низком риске.
   const sensitive = profile != null && SENSITIVE.has(profile.sensitivity ?? "");
   if (
+    isStrong &&
     sensitive &&
     compatibilityScore >= 70 &&
     riskPenalty < 0.2 &&

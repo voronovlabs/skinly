@@ -48,6 +48,9 @@ export interface RecommendationsParams {
   profile: SkinProfileSummaryLike | null;
 }
 
+export type Confidence = "high" | "medium" | "low";
+export type RecommendationType = "strong" | "fallback";
+
 export interface RecommendationItem {
   barcode: string;
   brand: string;
@@ -58,5 +61,8 @@ export interface RecommendationItem {
   recommendationScore: number;
   /** 0..100 из compatibility-движка; null если профиль пуст / нет состава. */
   compatibilityScore: number | null;
+  /** Сила рекомендации для UI: high/medium = strong, low = fallback. */
+  confidence: Confidence;
+  recommendationType: RecommendationType;
   reasons: string[];
 }

@@ -30,6 +30,7 @@ import {
 } from "@/lib/db/repositories/dm-recommendations";
 import {
   buildReasons,
+  classifyRecommendation,
   computeRiskPenalty,
   recommendationScore,
 } from "./score";
@@ -115,6 +116,9 @@ export async function getRecommendations(
       lowSeedConfidence,
     });
 
+    const { confidence, recommendationType } =
+      classifyRecommendation(compatScoreRaw);
+
     const item: RecommendationItem = {
       barcode: c.barcode,
       brand: c.brand,
@@ -123,6 +127,8 @@ export async function getRecommendations(
       imageUrl: c.image_url,
       recommendationScore: Math.round(recScore * 100),
       compatibilityScore: compatScoreRaw > 0 ? compatScoreRaw : null,
+      confidence,
+      recommendationType,
       reasons: buildReasons({
         seed,
         cand: c,
@@ -130,6 +136,7 @@ export async function getRecommendations(
         lowSeedConfidence,
         compatibilityScore: compatScoreRaw,
         riskPenalty: risk,
+        recommendationType,
       }),
     };
     return { item, recScore, compatScoreRaw };
