@@ -141,6 +141,7 @@ model User {
   hairProfile   HairProfile?
   favorites     Favorite[]
   scans         ScanHistory[]
+  events        UserProductEvent[]
 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -287,6 +288,39 @@ model ScanHistory {
 
   @@index([userId, scannedAt(sort: Desc)])
   @@index([productId])
+}
+
+// ─────────────────────────── User product events ───────────────────────────
+
+/// Единый лог поведенческих событий (Step 3 персонализации).
+/// Источник для preference vector и персональных рекомендаций.
+///
+/// Subject — либо `userId` (logged-in), либо `anonymousId` (guest/mobile
+/// deviceId). Ровно один должен быть заполнен; это валидируется в API
+/// (`POST /api/v1/events`), без БД-CHECK, чтобы не усложнять миграцию.
+///
+/// `barcode` — стабильный ключ продукта через все источники (DM + public),
+/// поэтому событие НЕ имеет FK на Product (товара может ещё не быть в каталоге).
+model UserProductEvent {
+  id          String   @id @default(cuid())
+  userId      String?
+  anonymousId String?
+  barcode     String
+  /// "view"|"scan"|"open"|"favorite"|"unfavorite"|"like"|"dislike"|"dismiss"|"open_recommendation"
+  eventType   String
+  weight      Int
+  /// "web"|"mobile"|"scan"|"reco"
+  source      String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([anonymousId, createdAt])
+  @@index([barcode])
+  @@index([eventType])
+  @@index([createdAt])
 }
 
 // ─────────────────────────── Raw ingestion ───────────────────────────
