@@ -14,6 +14,7 @@ import type { SkinProfileSummaryLike } from "@/lib/compatibility";
 import type {
   CandidateRow,
   Confidence,
+  PreferenceSignals,
   RecommendationType,
   SeedRow,
 } from "./types";
@@ -90,6 +91,29 @@ export function recommendationScore(i: ScoreInputs): number {
   return clamp01(raw);
 }
 
+/**
+ * Подмешать предпочтения к базовому score (0..1 → 0..1). Применяется ТОЛЬКО
+ * когда preference есть (eventCount ≥ 2). Без preference базовый score не
+ * меняется — текущее поведение endpoint'а сохраняется 1:1.
+ *
+ *   final = base*0.75
+ *         + 0.08*catAff + 0.07*brandAff + 0.08*ingAff
+ *         − 0.06*alreadySeen − 0.10*negative
+ */
+export function blendPreference(
+  baseScore: number,
+  p: PreferenceSignals,
+): number {
+  const raw =
+    baseScore * 0.75 +
+    0.08 * clamp01(p.likedCategoryAffinity) +
+    0.07 * clamp01(p.likedBrandAffinity) +
+    0.08 * clamp01(p.likedIngredientAffinity) -
+    0.06 * (p.alreadySeen ? 1 : 0) -
+    0.1 * (p.negative ? 1 : 0);
+  return clamp01(raw);
+}
+
 const SENSITIVE = new Set(["high", "reactive"]);
 
 /** Профиль-зависимый штраф риска 0..1. */
@@ -137,6 +161,8 @@ export function buildReasons(args: {
   compatibilityScore: number; // raw 0..100
   riskPenalty: number; // 0..1
   recommendationType: RecommendationType;
+  /** Сигналы предпочтений (null = персонализации нет). */
+  preference?: PreferenceSignals | null;
 }): string[] {
   const {
     seed,
@@ -146,6 +172,7 @@ export function buildReasons(args: {
     compatibilityScore,
     riskPenalty,
     recommendationType,
+    preference,
   } = args;
   const isStrong = recommendationType === "strong";
   const out: string[] = [];
@@ -158,6 +185,23 @@ export function buildReasons(args: {
   if (seed && lowSeedConfidence) {
     out.push("Ограниченная уверенность по составу");
   }
+
+  // Preference-причины (только если реальный сигнал есть). Максимум 2.
+  if (preference) {
+    const prefReasons: string[] = [];
+    if (preference.likedCategoryAffinity > 0) {
+      prefReasons.push("Похоже на товары, которые вы сохраняли");
+    }
+    if (preference.likedBrandAffinity > 0) {
+      prefReasons.push("Бренд из ваших интересов");
+    }
+    if (preference.likedIngredientAffinity > 0) {
+      prefReasons.push("Похожий активный состав");
+    }
+    // «Вы уже смотрели» НЕ показываем — только штрафуем в score.
+    out.push(...prefReasons.slice(0, 2));
+  }
+
   // Fallback (low) — честно помечаем как альтернативу той же категории.
   if (!isStrong && seed) {
     out.push("Альтернатива из той же категории");

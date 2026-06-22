@@ -29,13 +29,16 @@ import {
   getRecoSeedCandidates,
 } from "@/lib/db/repositories/dm-recommendations";
 import {
+  blendPreference,
   buildReasons,
   classifyRecommendation,
   computeRiskPenalty,
   recommendationScore,
 } from "./score";
+import { buildPreference, preferenceSignals } from "./preference";
 import type {
   CandidateRow,
+  Preference,
   RecommendationItem,
   RecommendationsParams,
   SeedRow,
@@ -86,9 +89,16 @@ export async function getRecommendations(
       afterCompatibilityGate: 0,
       fallbackUsed: false,
       finalCount: 0,
+      preference: null,
+      topScored: [],
     });
     return [];
   }
+
+  // Персонализация по событиям (on-the-fly). null → как раньше.
+  const preference: Preference | null = params.subject
+    ? await buildPreference(params.subject)
+    : null;
 
   // Compatibility одним запросом за весь пул (без N+1).
   const dmInputs = await getDmCompatibilityInputs(candidates.map((c) => c.barcode));
@@ -105,7 +115,7 @@ export async function getRecommendations(
     );
     const sameBrand = !!seed && !!seed.brand && c.brand === seed.brand;
 
-    const recScore = recommendationScore({
+    const baseScore = recommendationScore({
       overlap: c.overlap,
       seedSetSize: seed?.cset.length ?? 0,
       qualityScore: c.quality_score,
@@ -115,6 +125,10 @@ export async function getRecommendations(
       sameBrand,
       lowSeedConfidence,
     });
+
+    // Preference подмешиваем только если он есть (иначе base без изменений).
+    const sig = preference ? preferenceSignals(preference, c) : null;
+    const recScore = sig ? blendPreference(baseScore, sig) : baseScore;
 
     const { confidence, recommendationType } =
       classifyRecommendation(compatScoreRaw);
@@ -137,6 +151,7 @@ export async function getRecommendations(
         compatibilityScore: compatScoreRaw,
         riskPenalty: risk,
         recommendationType,
+        preference: sig,
       }),
     };
     return { item, recScore, compatScoreRaw };
@@ -172,8 +187,18 @@ export async function getRecommendations(
     afterCompatibilityGate,
     fallbackUsed,
     finalCount: top.length,
+    preference,
+    topScored: gated.slice(0, 5),
   });
   return top;
+}
+
+function topEntries(m: Map<string, number>, n: number): string {
+  return [...m.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, n)
+    .map(([k, v]) => `${k}:${v.toFixed(2)}`)
+    .join(", ");
 }
 
 function debugLog(d: {
@@ -185,12 +210,19 @@ function debugLog(d: {
   afterCompatibilityGate: number;
   fallbackUsed: boolean;
   finalCount: number;
+  preference: Preference | null;
+  topScored: ScoredCandidate[];
 }): void {
   if (process.env.RECO_DEBUG !== "1") return;
   const topOverlap = d.candidates.reduce((m, c) => Math.max(m, c.overlap), 0);
+  const subj = d.params.subject;
+  const subjectType = subj?.userId ? "user" : subj?.anonymousId ? "anon" : "none";
+  const subjectId = subj?.userId ?? subj?.anonymousId ?? "—";
   // eslint-disable-next-line no-console
   console.log(
     `[reco] seed=${d.params.barcode ?? "—"} mode=${d.seed ? "seed" : "profile"} ` +
+      `subjectType=${subjectType} subjectId=${subjectId} ` +
+      `preferenceEventCount=${d.preference?.eventCount ?? 0} ` +
       `seedRecognizedRatio=${d.seed ? d.seed.recognizedRatio.toFixed(4) : "—"} ` +
       `lowSeedConfidence=${d.lowSeedConfidence} ` +
       `candidatesAfterGates=${d.candidates.length} topOverlap=${topOverlap} ` +
@@ -198,6 +230,22 @@ function debugLog(d: {
       `afterCompatibilityGate=${d.afterCompatibilityGate} ` +
       `fallbackUsed=${d.fallbackUsed} final=${d.finalCount}`,
   );
+  if (d.preference) {
+    const p = d.preference;
+    // eslint-disable-next-line no-console
+    console.log(
+      `[reco] likedCategories=[${topEntries(p.categoryAffinity, 5)}] ` +
+        `likedBrands=[${topEntries(p.brandAffinity, 5)}] ` +
+        `likedIngredients=[${topEntries(p.ingredientAffinity, 10)}] ` +
+        `alreadySeen=${p.seenBarcodes.size} negative=${p.negativeBarcodes.size}`,
+    );
+    // eslint-disable-next-line no-console
+    console.log(
+      `[reco] top5=[${d.topScored
+        .map((s) => `${s.item.barcode}:rec${s.item.recommendationScore}/compat${s.item.compatibilityScore ?? "—"}`)
+        .join(", ")}]`,
+    );
+  }
   if (d.seed) {
     void getRecoDebugCounts(d.seed).then((c) => {
       // eslint-disable-next-line no-console

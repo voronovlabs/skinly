@@ -42,10 +42,42 @@ export interface SeedRow {
   irritancy_max: number;
 }
 
+/** Кто запрашивает рекомендации (для персонализации по событиям). */
+export interface Subject {
+  userId: string | null;
+  anonymousId: string | null;
+}
+
 export interface RecommendationsParams {
   barcode?: string | null;
   limit: number;
   profile: SkinProfileSummaryLike | null;
+  /** null → без персонализации (как раньше). */
+  subject?: Subject | null;
+}
+
+/** Preference vector, собранный on-the-fly из UserProductEvent. */
+export interface Preference {
+  eventCount: number;
+  /** category → affinity 0..1. */
+  categoryAffinity: Map<string, number>;
+  /** brand_normalized → affinity 0..1. */
+  brandAffinity: Map<string, number>;
+  /** canonical_id → affinity 0..1. */
+  ingredientAffinity: Map<string, number>;
+  /** scan/favorite/open_recommendation. */
+  seenBarcodes: Set<string>;
+  /** net-negative (unfavorite/dismiss/dislike перевесили). */
+  negativeBarcodes: Set<string>;
+}
+
+/** Per-candidate сигналы предпочтений (0..1 + флаги). */
+export interface PreferenceSignals {
+  likedCategoryAffinity: number;
+  likedBrandAffinity: number;
+  likedIngredientAffinity: number;
+  alreadySeen: boolean;
+  negative: boolean;
 }
 
 export type Confidence = "high" | "medium" | "low";

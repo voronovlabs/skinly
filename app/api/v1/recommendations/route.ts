@@ -1,6 +1,8 @@
 import type { NextRequest } from "next/server";
 import type { SkinProfileSummaryLike } from "@/lib/compatibility";
+import { getSessionFromAuthorizationHeader } from "@/lib/auth/bearer";
 import { getRecommendations } from "@/lib/recommendations/service";
+import type { Subject } from "@/lib/recommendations/types";
 import { apiJson, apiPreflight, serverError } from "@/lib/api/respond";
 
 /**
@@ -57,8 +59,15 @@ export async function GET(req: NextRequest) {
       }
     : null;
 
+  // Subject для персонализации: Bearer userId → иначе X-Anon-Id → иначе нет.
+  const session = await getSessionFromAuthorizationHeader(req);
+  const userId = session?.type === "user" ? session.userId : null;
+  const anonymousId = userId ? null : req.headers.get("x-anon-id")?.trim() || null;
+  const subject: Subject | null =
+    userId || anonymousId ? { userId, anonymousId } : null;
+
   try {
-    const items = await getRecommendations({ barcode, limit, profile });
+    const items = await getRecommendations({ barcode, limit, profile, subject });
     // Персонализировано → не кэшируем на edge.
     return apiJson({ items }, { cache: "no-store" });
   } catch (e) {
