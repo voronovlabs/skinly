@@ -43,19 +43,33 @@ export async function listProducts({
     ? { category: category as import("@prisma/client").ProductCategory }
     : {};
 
-  // NOTE: Ingredient search (via JOIN) was removed — it caused full-table
-  // scans on 40k+ products × ingredient links, making queries time out in
-  // production. Name + brand ILIKE is fast enough without an index for
-  // the current dataset size.
-  const searchFilter = trimmed
-    ? {
-        OR: [
-          { name: { contains: trimmed, mode: "insensitive" as const } },
-          { brand: { contains: trimmed, mode: "insensitive" as const } },
-          { barcode: { contains: trimmed, mode: "insensitive" as const } },
-        ],
-      }
-    : {};
+  // Токенизированный поиск: «Vichy шампунь» → находит товары, где КАЖДЫЙ токен
+  // встречается в name ИЛИ brand (в любом порядке). Плюс отдельная ветка —
+  // поиск по штрихкоду целиком. Single-word работает как раньше.
+  //
+  // NOTE: Ingredient search (via JOIN) убран — он давал full-table scan на
+  // 40k+ товарах. Name+brand ILIKE достаточно быстр для текущего размера;
+  // для ускорения contains-поиска рекомендуется GIN pg_trgm индекс (см. SQL
+  // в аудите) — это отдельная миграция, здесь не делаем.
+  const tokens = trimmed ? trimmed.split(/\s+/).filter(Boolean) : [];
+  const searchFilter =
+    trimmed && tokens.length > 0
+      ? {
+          OR: [
+            // все токены присутствуют в name/brand (любой порядок)
+            {
+              AND: tokens.map((tok) => ({
+                OR: [
+                  { name: { contains: tok, mode: "insensitive" as const } },
+                  { brand: { contains: tok, mode: "insensitive" as const } },
+                ],
+              })),
+            },
+            // поиск по штрихкоду — по всей строке запроса
+            { barcode: { contains: trimmed, mode: "insensitive" as const } },
+          ],
+        }
+      : {};
 
   const where = { ...categoryFilter, ...(trimmed ? searchFilter : {}) };
 
