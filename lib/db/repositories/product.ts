@@ -130,21 +130,17 @@ async function searchProducts(
     ? Prisma.sql` AND ("createdAt", "id") < (SELECT "createdAt", "id" FROM "Product" WHERE "id" = ${cursor})`
     : Prisma.empty;
 
-  const [rows, totalRows] = await Promise.all([
-    prisma.$queryRaw<RawRow[]>(Prisma.sql`
-      SELECT "id", "barcode", "brand", "name", "category"::text AS category,
-             "emoji", "imageUrl"
-      FROM "Product"
-      WHERE ${catSql}${matchSql}${cursorSql}
-      ORDER BY "createdAt" DESC, "id" DESC
-      LIMIT ${take}
-    `),
-    cursor
-      ? Promise.resolve<{ count: number }[]>([])
-      : prisma.$queryRaw<{ count: number }[]>(Prisma.sql`
-          SELECT count(*)::int AS count FROM "Product" WHERE ${catSql}${matchSql}
-        `),
-  ]);
+  // Только сама выборка (LIMIT take). COUNT(*) НЕ считаем — см. ниже.
+  const t0 = Date.now();
+  const rows = await prisma.$queryRaw<RawRow[]>(Prisma.sql`
+    SELECT "id", "barcode", "brand", "name", "category"::text AS category,
+           "emoji", "imageUrl"
+    FROM "Product"
+    WHERE ${catSql}${matchSql}${cursorSql}
+    ORDER BY "createdAt" DESC, "id" DESC
+    LIMIT ${take}
+  `);
+  const searchQueryMs = Date.now() - t0;
 
   const hasMore = rows.length > limit;
   const rawItems = hasMore ? rows.slice(0, limit) : rows;
@@ -160,13 +156,25 @@ async function searchProducts(
     imageUrl: r.imageUrl ?? null,
   }));
 
-  if (withIngredients) await attachIngredients(items);
+  let ingredientsMs = 0;
+  if (withIngredients) {
+    const t1 = Date.now();
+    await attachIngredients(items);
+    ingredientsMs = Date.now() - t1;
+  }
 
-  return {
-    items,
-    nextCursor,
-    total: cursor ? null : totalRows[0]?.count ?? 0,
-  };
+  if (process.env.SEARCH_TIMING === "1") {
+    // eslint-disable-next-line no-console
+    console.log(
+      `[products] q=${JSON.stringify(trimmed)} searchQueryMs=${searchQueryMs} ` +
+        `countMs=0(skipped) ingredientsMs=${ingredientsMs} rows=${items.length}`,
+    );
+  }
+
+  // total для поиска НЕ считаем: COUNT(*) без LIMIT сканирует все trgm-совпадения
+  // (тысячи строк) и давал секунды поверх быстрой LIMIT-выборки. Пагинация —
+  // по nextCursor (limit+1). total остаётся nullable в контракте (ProductListPage).
+  return { items, nextCursor, total: null };
 }
 
 export async function listProducts(

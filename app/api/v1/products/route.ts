@@ -90,21 +90,36 @@ export async function GET(req: NextRequest) {
       }
     : null;
 
+  const timing = process.env.SEARCH_TIMING === "1";
+  const tList = Date.now();
+
   try {
     const page = await listProducts({
       cursor,
       q,
       category,
+      // Ингредиенты нужны только для forMe-скоринга. Для обычного поиска — нет.
       withIngredients: Boolean(profile),
       limit,
     });
+    const listMs = Date.now() - tList;
 
     if (!profile) {
-      return apiJson({
+      const tSer = Date.now();
+      const body = {
         items: page.items.map(strip),
         nextCursor: page.nextCursor,
         total: page.total,
-      });
+      };
+      const serializeMs = Date.now() - tSer;
+      if (timing) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[products] q=${q ?? "—"} forMe=no listMs=${listMs} ` +
+            `compatibilityMs=0(n/a) serializeMs=${serializeMs} items=${body.items.length}`,
+        );
+      }
+      return apiJson(body);
     }
 
     // Локальный scoring для forMe — та же логика, что и в
@@ -112,6 +127,7 @@ export async function GET(req: NextRequest) {
     const engineProfile = summaryProfileToEngine(profile);
     // Flag-gated: DM-путь при USE_DM_COMPATIBILITY=true, иначе legacy. Batch —
     // один запрос на страницу (без N+1). DTO ответа не меняется.
+    const tCompat = Date.now();
     const resolved = await resolveCompatibilityBatch(
       engineProfile,
       page.items.map((item) => ({
@@ -119,6 +135,9 @@ export async function GET(req: NextRequest) {
         legacyIngredients: item.inciList ?? [],
       })),
     );
+    const compatibilityMs = Date.now() - tCompat;
+
+    const tSer = Date.now();
     const scored: ProductListItem[] = page.items.map((item, i) => {
       const r = resolved[i];
       const hasFacts = r.facts.length > 0;
@@ -129,6 +148,15 @@ export async function GET(req: NextRequest) {
       };
     });
     scored.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+    const serializeMs = Date.now() - tSer;
+
+    if (timing) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[products] q=${q ?? "—"} forMe=yes listMs=${listMs} ` +
+          `compatibilityMs=${compatibilityMs} serializeMs=${serializeMs} items=${scored.length}`,
+      );
+    }
 
     return apiJson(
       { items: scored, nextCursor: page.nextCursor, total: page.total },
