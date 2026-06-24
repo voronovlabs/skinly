@@ -3,13 +3,6 @@ import { prisma } from "@/lib/prisma";
 
 const DEFAULT_PAGE_SIZE = 20;
 
-/**
- * Потолок пула кандидатов для поиска. Bitmap-скан останавливается на нём (рано),
- * затем сортируем уже ограниченный набор. Чем больше — тем точнее порядок по
- * createdAt, но медленнее. 500 держит searchQueryMs в десятках мс.
- */
-const CANDIDATE_CAP = 500;
-
 export interface ProductListItem {
   id: string;
   barcode: string;
@@ -71,12 +64,32 @@ function foldSql(expr: Prisma.Sql): Prisma.Sql {
 }
 
 /**
+ * LIKE-паттерн `'%token%'` как SQL-ЛИТЕРАЛ (а не bind-параметр).
+ *
+ * КРИТИЧНО для производительности: pg_trgm оценивает селективность LIKE только
+ * по ЛИТЕРАЛЬНОМУ паттерну. С bind-параметром ($1) оценка недоступна на этапе
+ * планирования → планировщик выбирает Seq Scan вместо Bitmap Index Scan.
+ *
+ * Экранирование (защита от инъекции и от LIKE-метасимволов в пользовательском
+ * вводе): backslash → %_ → одинарная кавычка. ESCAPE по умолчанию '\'.
+ */
+function likePatternLiteral(raw: string): Prisma.Sql {
+  const escaped = raw
+    .toLowerCase()
+    .replace(/\\/g, "\\\\")
+    .replace(/%/g, "\\%")
+    .replace(/_/g, "\\_")
+    .replace(/'/g, "''");
+  return Prisma.raw(`'%${escaped}%'`);
+}
+
+/**
  * Один токен совпадает в folded brand/name/category. barcode ищется отдельной
- * веткой `"barcode" LIKE %q%` (см. searchProducts) — под неё свой plain-trgm
- * индекс. Так каждое условие соответствует ровно одному expression-индексу.
+ * веткой `"barcode" LIKE '%q%'` (см. searchProducts). Паттерны — литералы,
+ * чтобы pg_trgm выбрал Bitmap Index Scan по product_*_folded_trgm.
  */
 function tokenCondSql(token: string): Prisma.Sql {
-  const pat = `%${token.toLowerCase()}%`;
+  const pat = likePatternLiteral(token);
   return Prisma.sql`(
     ${foldSql(Prisma.sql`"brand"`)} LIKE ${pat}
     OR ${foldSql(Prisma.sql`"name"`)} LIKE ${pat}
@@ -124,49 +137,40 @@ async function searchProducts(
 ): Promise<ProductListPage> {
   const { cursor, category, withIngredients = false, limit = DEFAULT_PAGE_SIZE } = params;
   const take = limit + 1;
+  // Курсор поиска — числовой OFFSET (а не keyset по id). Старый id-курсор с
+  // прошлых деплоев → NaN → 0 (мягкая деградация).
+  const offset = cursor ? Math.max(0, Number.parseInt(cursor, 10) || 0) : 0;
 
   const tokens = trimmed.split(/\s+/).filter(Boolean);
   const allTokens = Prisma.join(tokens.map(tokenCondSql), " AND ");
-  const barcodePat = `%${trimmed.toLowerCase()}%`;
-  const matchSql = Prisma.sql`((${allTokens}) OR "barcode" LIKE ${barcodePat})`;
+  const matchSql = Prisma.sql`((${allTokens}) OR "barcode" LIKE ${likePatternLiteral(trimmed)})`;
 
   const catSql = category
     ? Prisma.sql`"category" = ${category}::"ProductCategory" AND `
     : Prisma.empty;
-  const cursorSql = cursor
-    ? Prisma.sql` AND ("createdAt", "id") < (SELECT "createdAt", "id" FROM "Product" WHERE "id" = ${cursor})`
-    : Prisma.empty;
 
-  // Почему так, а не `... WHERE match ORDER BY createdAt LIMIT 21`:
-  // ORDER BY поверх trgm-bitmap заставляет собрать ВСЕ совпадения (тысячи),
-  // сделать heap-fetch + lossy-recheck `lower(translate(...))` по каждой строке
-  // и только потом отсортировать → 1.8s. Здесь ограничиваем пул кандидатов
-  // в MATERIALIZED-CTE: bitmap-скан останавливается на CANDIDATE_CAP (рано),
-  // дальше сортируем уже маленький набор. MATERIALIZED обязателен — иначе PG
-  // заинлайнит CTE и вернётся к «собрать всё и отсортировать».
-  //
-  // Цена: порядок/пагинация по createdAt становятся приблизительными (top из
-  // capped-пула), но для поиска это приемлемо и быстро. total и так null.
+  // БЕЗ ORDER BY и БЕЗ CTE.
+  //   - ORDER BY "createdAt" заставлял собрать ВСЕ совпадения (тысячи) +
+  //     lossy-recheck + Sort → 2.2s. Для поиска порядок по дате не нужен.
+  //   - MATERIALIZED-CTE с LIMIT 500 ломал план → Seq Scan (планировщик решал,
+  //     что найти 500 совпадений seq-scan'ом дешевле).
+  // Теперь: чистый `WHERE <match> LIMIT take OFFSET` с ЛИТЕРАЛЬНЫМИ паттернами
+  // → pg_trgm оценивает селективность → Bitmap Index Scan, который
+  // останавливается рано по LIMIT. Порядок — bitmap (релевантность heap),
+  // пагинация — OFFSET. total и так null.
   const t0 = Date.now();
   const rows = await prisma.$queryRaw<RawRow[]>(Prisma.sql`
-    WITH matched AS MATERIALIZED (
-      SELECT "id", "createdAt"
-      FROM "Product"
-      WHERE ${catSql}${matchSql}${cursorSql}
-      LIMIT ${CANDIDATE_CAP}
-    )
-    SELECT p."id", p."barcode", p."brand", p."name", p."category"::text AS category,
-           p."emoji", p."imageUrl"
-    FROM matched m
-    JOIN "Product" p ON p."id" = m."id"
-    ORDER BY m."createdAt" DESC, m."id" DESC
-    LIMIT ${take}
+    SELECT "id", "barcode", "brand", "name", "category"::text AS category,
+           "emoji", "imageUrl"
+    FROM "Product"
+    WHERE ${catSql}${matchSql}
+    LIMIT ${take} OFFSET ${offset}
   `);
   const searchQueryMs = Date.now() - t0;
 
   const hasMore = rows.length > limit;
   const rawItems = hasMore ? rows.slice(0, limit) : rows;
-  const nextCursor = hasMore ? rawItems[rawItems.length - 1].id : null;
+  const nextCursor = hasMore ? String(offset + limit) : null;
 
   const items: ProductListItem[] = rawItems.map((r) => ({
     id: r.id,
