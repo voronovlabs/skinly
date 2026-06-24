@@ -50,19 +50,30 @@ export interface ListProductsParams {
 const CYR_UP = "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ";
 const CYR_LO = "абвгдеёжзийклмнопрстуфхцчшщъыьэюя";
 
-/** lower(translate(expr, КИР_ВЕРХ, кир_ниж)) — свёртка регистра RU+EN. */
+// ВАЖНО: константы translate — это SQL-ЛИТЕРАЛЫ (Prisma.raw), а не bind-параметры.
+// Только тогда выражение в WHERE (`lower(translate("name", 'АБВ…', 'абв…'))`)
+// побайтово совпадает с expression в GIN/pg_trgm индексе, и планировщик его
+// использует. С bind-параметрами ($1,$2) индекс НЕ матчится → seq scan.
+// Строки фиксированы и не содержат кавычек — инъекция невозможна.
+const TR_FROM = Prisma.raw(`'${CYR_UP}'`);
+const TR_TO = Prisma.raw(`'${CYR_LO}'`);
+
+/** lower(translate(expr, 'КИР_ВЕРХ', 'кир_ниж')) — свёртка регистра RU+EN. */
 function foldSql(expr: Prisma.Sql): Prisma.Sql {
-  return Prisma.sql`lower(translate(${expr}, ${CYR_UP}, ${CYR_LO}))`;
+  return Prisma.sql`lower(translate(${expr}, ${TR_FROM}, ${TR_TO}))`;
 }
 
-/** Один токен совпадает хотя бы в brand/name/barcode/category. */
+/**
+ * Один токен совпадает в folded brand/name/category. barcode ищется отдельной
+ * веткой `"barcode" LIKE %q%` (см. searchProducts) — под неё свой plain-trgm
+ * индекс. Так каждое условие соответствует ровно одному expression-индексу.
+ */
 function tokenCondSql(token: string): Prisma.Sql {
   const pat = `%${token.toLowerCase()}%`;
   return Prisma.sql`(
     ${foldSql(Prisma.sql`"brand"`)} LIKE ${pat}
     OR ${foldSql(Prisma.sql`"name"`)} LIKE ${pat}
     OR ${foldSql(Prisma.sql`"category"::text`)} LIKE ${pat}
-    OR ${foldSql(Prisma.sql`"barcode"`)} LIKE ${pat}
   )`;
 }
 
