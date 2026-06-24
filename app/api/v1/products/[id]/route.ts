@@ -58,11 +58,28 @@ export async function GET(
       return apiError("not_found", "Product not found", 404);
     }
 
+    // Агрегат рейтинга для карточки (не падаем, если что-то пойдёт не так).
+    let avgRating = 0;
+    let reviewsCount = 0;
+    try {
+      const agg = await prisma.productReview.aggregate({
+        where: { productId: product.id },
+        _avg: { rating: true },
+        _count: { _all: true },
+      });
+      avgRating = agg._avg.rating ? Math.round(agg._avg.rating * 10) / 10 : 0;
+      reviewsCount = agg._count._all;
+    } catch (e) {
+      console.error("[api/v1/products/:id] rating aggregate failed:", e);
+    }
+
     const dto = {
       id: product.id,
       barcode: product.barcode,
       brand: product.brand,
       name: product.name,
+      avgRating,
+      reviewsCount,
       // UPPERCASE enum значение из БД — тот же формат, что отдаёт
       // /api/v1/products и использует сайт.
       category: product.category,

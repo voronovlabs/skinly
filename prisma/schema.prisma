@@ -142,6 +142,7 @@ model User {
   favorites     Favorite[]
   scans         ScanHistory[]
   events        UserProductEvent[]
+  reviews       ProductReview[]
 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -210,12 +211,39 @@ model Product {
   ingredients   ProductIngredient[]
   scans         ScanHistory[]
   favorites     Favorite[]
+  reviews       ProductReview[]
 
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
 
   @@index([brand, name])
   @@index([category])
+}
+
+// ─────────────────────────── ProductReview ───────────────────────────
+
+/// Отзыв пользователя на товар: оценка 1–5 + опц. комментарий.
+/// Один отзыв на (user, product) — повторная отправка обновляет существующий.
+/// `barcode` денормализован для удобных выборок по штрихкоду.
+model ProductReview {
+  id        String   @id @default(cuid())
+  userId    String
+  productId String
+  barcode   String
+  /// 1..5 (валидируется в API).
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User    @relation(fields: [userId],    references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+  @@index([productId])
+  @@index([barcode])
+  @@index([userId])
+  @@index([createdAt])
 }
 
 model Ingredient {

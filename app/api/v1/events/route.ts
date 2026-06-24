@@ -37,6 +37,7 @@ const EVENT_WEIGHTS: Record<string, number> = {
   dislike: -3,
   dismiss: -1,
   open_recommendation: 2,
+  review: 2,
 };
 
 const DEDUP_TYPES = new Set(["view", "open", "scan"]);
