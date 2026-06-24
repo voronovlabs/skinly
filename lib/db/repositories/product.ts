@@ -3,6 +3,13 @@ import { prisma } from "@/lib/prisma";
 
 const DEFAULT_PAGE_SIZE = 20;
 
+/**
+ * Потолок пула кандидатов для поиска. Bitmap-скан останавливается на нём (рано),
+ * затем сортируем уже ограниченный набор. Чем больше — тем точнее порядок по
+ * createdAt, но медленнее. 500 держит searchQueryMs в десятках мс.
+ */
+const CANDIDATE_CAP = 500;
+
 export interface ProductListItem {
   id: string;
   barcode: string;
@@ -130,14 +137,29 @@ async function searchProducts(
     ? Prisma.sql` AND ("createdAt", "id") < (SELECT "createdAt", "id" FROM "Product" WHERE "id" = ${cursor})`
     : Prisma.empty;
 
-  // Только сама выборка (LIMIT take). COUNT(*) НЕ считаем — см. ниже.
+  // Почему так, а не `... WHERE match ORDER BY createdAt LIMIT 21`:
+  // ORDER BY поверх trgm-bitmap заставляет собрать ВСЕ совпадения (тысячи),
+  // сделать heap-fetch + lossy-recheck `lower(translate(...))` по каждой строке
+  // и только потом отсортировать → 1.8s. Здесь ограничиваем пул кандидатов
+  // в MATERIALIZED-CTE: bitmap-скан останавливается на CANDIDATE_CAP (рано),
+  // дальше сортируем уже маленький набор. MATERIALIZED обязателен — иначе PG
+  // заинлайнит CTE и вернётся к «собрать всё и отсортировать».
+  //
+  // Цена: порядок/пагинация по createdAt становятся приблизительными (top из
+  // capped-пула), но для поиска это приемлемо и быстро. total и так null.
   const t0 = Date.now();
   const rows = await prisma.$queryRaw<RawRow[]>(Prisma.sql`
-    SELECT "id", "barcode", "brand", "name", "category"::text AS category,
-           "emoji", "imageUrl"
-    FROM "Product"
-    WHERE ${catSql}${matchSql}${cursorSql}
-    ORDER BY "createdAt" DESC, "id" DESC
+    WITH matched AS MATERIALIZED (
+      SELECT "id", "createdAt"
+      FROM "Product"
+      WHERE ${catSql}${matchSql}${cursorSql}
+      LIMIT ${CANDIDATE_CAP}
+    )
+    SELECT p."id", p."barcode", p."brand", p."name", p."category"::text AS category,
+           p."emoji", p."imageUrl"
+    FROM matched m
+    JOIN "Product" p ON p."id" = m."id"
+    ORDER BY m."createdAt" DESC, m."id" DESC
     LIMIT ${take}
   `);
   const searchQueryMs = Date.now() - t0;
