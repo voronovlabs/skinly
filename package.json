@@ -19,7 +19,10 @@
     "scrape:farera": "tsx scripts/scrape-farera.ts",
     "enrich:farera-barcodes": "tsx scripts/enrich-farera-barcodes.ts",
     "normalize:national-catalog": "tsx scripts/normalize-national-catalog.ts",
-    "merge:national-jsonl": "tsx scripts/merge-national-jsonl.ts"
+    "merge:national-jsonl": "tsx scripts/merge-national-jsonl.ts",
+    "scrape:inn-skin": "tsx scripts/scrape-inn-skin.ts",
+    "normalize:inn-skin": "tsx scripts/normalize-inn-skin.ts",
+    "merge:inn-skin": "tsx scripts/merge-inn-skin.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.2.1",
