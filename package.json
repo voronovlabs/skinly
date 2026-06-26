@@ -22,7 +22,8 @@
     "merge:national-jsonl": "tsx scripts/merge-national-jsonl.ts",
     "scrape:inn-skin": "tsx scripts/scrape-inn-skin.ts",
     "normalize:inn-skin": "tsx scripts/normalize-inn-skin.ts",
-    "merge:inn-skin": "tsx scripts/merge-inn-skin.ts"
+    "merge:inn-skin": "tsx scripts/merge-inn-skin.ts",
+    "check:inn-skin-parser": "tsx scripts/check-inn-skin-parser.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.2.1",

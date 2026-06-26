@@ -227,31 +227,65 @@ function extractPrice(text: string): {
 }
 
 /**
- * INCI: приоритет — query-параметр `ingredients=` (самый чистый источник).
- * Берём самую длинную расшифровку среди всех вхождений (навигационные
- * ссылки идут с пустым параметром). Fallback — текст после «Состав».
+ * INCI. Берём ДВА источника с детальной страницы и выбираем более полный
+ * (защита от обрезки):
+ *   1. блок «Состав» — предпочтительный человекочитаемый текст;
+ *   2. query-параметр `ingredients=` кнопки «Разобрать» — кросс-чек.
+ *
+ * История бага: старый парсер исключал ')' из значения параметра, поэтому
+ * «AQUA (WATER, URIAGE THERMAL WATER), …» обрезался на первой ')». А
+ * fallback по «Состав» не срабатывал, потому что JS `\b` не ставит границу
+ * перед кириллицей. Оба места исправлены ниже.
  */
 function extractIngredients(html: string, text: string): string | null {
-  const re = /ingredients=([^"'&)\s]+)/gi;
+  const fromBlock = extractCompositionBlock(text);
+  const fromParam = extractIngredientsParam(html);
+
+  const candidates = [fromBlock, fromParam].filter(
+    (v): v is string => !!v && v.length >= 8,
+  );
+  if (candidates.length === 0) return null;
+  // Более длинный = более полный. «Состав» предпочтителен, но если он
+  // оказался короче (например, обрезан футером), берём параметр.
+  candidates.sort((a, b) => b.length - a.length);
+  return candidates[0];
+}
+
+/**
+ * Текстовый блок «Состав». JS `\b` не дружит с кириллицей, поэтому якоримся
+ * на заглавную «Состав», за которой идёт латинский INCI. Класс символов
+ * захватывает скобки/запятые/слэши/проценты — стоп на первом нелатинском
+ * символе (обычно — кириллический футер).
+ */
+function extractCompositionBlock(text: string): string | null {
+  const m = /Состав[\s:—–-]*([A-Z(][A-Za-z0-9 ,.\-/()%[\]+'&|]+)/.exec(text);
+  if (!m) return null;
+  const inci = cleanInci(m[1]);
+  return inci.length >= 8 ? inci : null;
+}
+
+/**
+ * Значение query-параметра `ingredients=` целиком, как ОДНА строка.
+ *
+ * КРИТИЧНО: значение содержит литеральные '(' и ')'. Класс-исключение НЕ
+ * должно содержать ')', иначе обрезка на первой скобке. Значение в href
+ * ограничено кавычкой/пробелом/угловой скобкой. Декодируем целиком
+ * (никакого split по запятой — это делает уже нормализатор отдельно).
+ * Среди всех вхождений берём самое длинное (навигационные ссылки пустые).
+ */
+function extractIngredientsParam(html: string): string | null {
+  const re = /[?&]ingredients=([^"'\s<>]+)/gi;
   let best = "";
   let m: RegExpExecArray | null;
   while ((m = re.exec(html)) !== null) {
     const decoded = safeDecodeURIComponent(m[1]).trim();
     if (decoded.length > best.length) best = decoded;
   }
-  if (best.length >= 8) return cleanInci(best);
-
-  // Fallback: «Состав <...>» до конца/следующего заголовка.
-  const sm = /\bСостав\b[:\s]*([A-Za-z0-9].*)$/.exec(text);
-  if (sm) {
-    const tail = sm[1].trim();
-    if (tail.length >= 8) return cleanInci(tail);
-  }
-  return null;
+  return best.length >= 8 ? cleanInci(best) : null;
 }
 
 function cleanInci(s: string): string {
-  return s.replace(/\s+/g, " ").replace(/\s*\.\s*$/, "").trim();
+  return s.replace(/\s+/g, " ").trim().replace(/\s*\.\s*$/, "").trim();
 }
 
 /** Текст между «Описание» и «Состав». */

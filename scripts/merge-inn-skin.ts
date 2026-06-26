@@ -232,6 +232,7 @@ async function main(): Promise<void> {
       retailer_article: string | null;
       price_value: number | null;
       has_inci: boolean;
+      has_image: boolean;
     }[]
   >(Prisma.sql`
     SELECT
@@ -240,7 +241,8 @@ async function main(): Promise<void> {
       nrm.category,
       nrm.retailer_article,
       s.price_value,
-      (coalesce(nrm.ingredients_raw,'') <> '') AS has_inci
+      (coalesce(nrm.ingredients_raw,'') <> '') AS has_inci,
+      (coalesce(nrm.image_url,'') <> '')        AS has_image
     FROM scrape.inn_skin_products_normalized nrm
     JOIN scrape.inn_skin_products s ON s.id = nrm.source_product_id
     ORDER BY s.created_at ASC
@@ -276,7 +278,8 @@ async function main(): Promise<void> {
     log(
       `  • [${r.brand_normalized ?? "—"}] ${trunc(r.product_name_normalized, 46)} ` +
         `| ${r.category ?? "—"} | art=${r.retailer_article ?? "—"} ` +
-        `| ${r.price_value ?? "—"}₽ | inci=${r.has_inci ? "yes" : "no"}`,
+        `| ${r.price_value ?? "—"}₽ | inci=${r.has_inci ? "yes" : "no"}` +
+        ` | img=${r.has_image ? "yes" : "no"}`,
     );
   }
   log("");

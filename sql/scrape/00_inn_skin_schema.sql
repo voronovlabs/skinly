@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS scrape.inn_skin_products_normalized (
   product_name_normalized  text,
   name_key                 text,                 -- dm.name_key(product_name)
   category                 text,                 -- ProductCategory enum value (как text)
+  image_url                text,                 -- зеркало raw.image_url (в Product НЕ пишем)
   ingredients_raw          text,
   ingredients_normalized   text[],               -- dm.norm_ingredients(ingredients_raw)
   retailer_article         text,
@@ -79,3 +80,9 @@ CREATE INDEX IF NOT EXISTS idx_inn_skin_norm_brandkey
   ON scrape.inn_skin_products_normalized (brand_key);
 CREATE INDEX IF NOT EXISTS idx_inn_skin_norm_namekey
   ON scrape.inn_skin_products_normalized (name_key);
+
+-- ── Идемпотентные миграции для уже существующих БД ──────────────────────────
+-- CREATE TABLE IF NOT EXISTS не добавит колонки в уже созданную таблицу,
+-- поэтому новые поля прокатываем явным ALTER ... ADD COLUMN IF NOT EXISTS.
+ALTER TABLE scrape.inn_skin_products_normalized
+  ADD COLUMN IF NOT EXISTS image_url text;

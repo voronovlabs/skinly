@@ -80,7 +80,7 @@ async function main(): Promise<void> {
   const affected = await prisma.$executeRaw(Prisma.sql`
     INSERT INTO scrape.inn_skin_products_normalized (
       source_product_id, source_url, brand_normalized, brand_key,
-      product_name_normalized, name_key, category, ingredients_raw,
+      product_name_normalized, name_key, category, image_url, ingredients_raw,
       ingredients_normalized, retailer_article, ean, has_valid_ean, updated_at
     )
     SELECT
@@ -93,6 +93,7 @@ async function main(): Promise<void> {
       ( SELECT (${CATEGORY_CASE})
         FROM (SELECT lower(coalesce(s.category_raw,'') || ' ' || coalesce(s.product_name,'')) AS src) c
       ),
+      s.image_url,
       s.ingredients_raw,
       dm.norm_ingredients(s.ingredients_raw),
       s.retailer_article,
@@ -109,6 +110,7 @@ async function main(): Promise<void> {
       product_name_normalized = EXCLUDED.product_name_normalized,
       name_key                = EXCLUDED.name_key,
       category                = EXCLUDED.category,
+      image_url               = EXCLUDED.image_url,
       ingredients_raw         = EXCLUDED.ingredients_raw,
       ingredients_normalized  = EXCLUDED.ingredients_normalized,
       retailer_article        = EXCLUDED.retailer_article,
