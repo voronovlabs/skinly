@@ -23,7 +23,9 @@
     "scrape:inn-skin": "tsx scripts/scrape-inn-skin.ts",
     "normalize:inn-skin": "tsx scripts/normalize-inn-skin.ts",
     "merge:inn-skin": "tsx scripts/merge-inn-skin.ts",
-    "check:inn-skin-parser": "tsx scripts/check-inn-skin-parser.ts"
+    "check:inn-skin-parser": "tsx scripts/check-inn-skin-parser.ts",
+    "scrape:barcode-list": "tsx scripts/scrape-barcode-list.ts",
+    "match:inn-skin-barcodes": "tsx scripts/match-inn-skin-barcodes.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.2.1",

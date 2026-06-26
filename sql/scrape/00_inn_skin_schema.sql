@@ -86,3 +86,63 @@ CREATE INDEX IF NOT EXISTS idx_inn_skin_norm_namekey
 -- поэтому новые поля прокатываем явным ALTER ... ADD COLUMN IF NOT EXISTS.
 ALTER TABLE scrape.inn_skin_products_normalized
   ADD COLUMN IF NOT EXISTS image_url text;
+
+-- ── EAN enrichment · УНИВЕРСАЛЬНЫЙ пул внешних идентификаторов ───────────────
+-- НЕ привязано к barcode-list.ru. Один пул на ВСЕ источники EAN/GTIN; источник
+-- различается полем `source` ('barcode-list', далее 'openfoodfacts', 'gs1',
+-- 'wb', 'ozon', 'goldapple' …). Новый источник = новый адаптер-скрейпер,
+-- который пишет в ЭТУ ЖЕ таблицу с другим `source`. Схему менять не нужно.
+--
+-- Это staging/краудсорс → в Product ничего не уходит автоматически.
+--
+-- Миграция со старого имени (баркод-специфичная таблица заменена универсальной).
+DROP TABLE IF EXISTS scrape.barcode_list_products;
+
+CREATE TABLE IF NOT EXISTS scrape.external_product_identifiers (
+  id                  text        PRIMARY KEY,
+  source              text        NOT NULL,        -- 'barcode-list' | 'openfoodfacts' | …
+  source_query        text,                        -- что искали (обычно бренд)
+  source_url          text,
+  ean                 text        NOT NULL,        -- валидный EAN/GTIN (checksum)
+  product_name        text,                        -- название с источника (любой язык)
+  brand_guess         text,                        -- бренд, если источник его отдаёт
+  normalized_name_key text,                        -- dm.name_key(product_name)
+  raw_payload         jsonb       NOT NULL,
+  scraped_at          timestamptz NOT NULL,
+  updated_at          timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (source, ean)
+);
+
+CREATE INDEX IF NOT EXISTS idx_extid_source   ON scrape.external_product_identifiers (source);
+CREATE INDEX IF NOT EXISTS idx_extid_query    ON scrape.external_product_identifiers (source, source_query);
+CREATE INDEX IF NOT EXISTS idx_extid_ean      ON scrape.external_product_identifiers (ean);
+CREATE INDEX IF NOT EXISTS idx_extid_namekey  ON scrape.external_product_identifiers (normalized_name_key);
+
+-- ── Кандидаты сопоставления inn-skin ↔ внешний EAN ──────────────────────────
+-- Результат matcher'а (dry-run). НИЧЕГО не пишется в Product. Каждая строка —
+-- гипотеза «у этого inn-skin товара, вероятно, такой EAN» с confidence/tier/
+-- reasons и указанием, из какого источника пришёл EAN.
+-- Производная таблица — пересоздаётся matcher'ом, поэтому DROP безопасен.
+DROP TABLE IF EXISTS scrape.inn_skin_ean_candidates;
+
+CREATE TABLE IF NOT EXISTS scrape.inn_skin_ean_candidates (
+  id                text        PRIMARY KEY,
+  source_product_id text        NOT NULL
+                      REFERENCES scrape.inn_skin_products(id) ON DELETE CASCADE,
+  inn_skin_name     text,
+  inn_skin_brand    text,
+  retailer_article  text,                          -- артикул продавца (НЕ EAN)
+  source            text        NOT NULL,          -- источник EAN ('barcode-list' …)
+  candidate_ean     text        NOT NULL,
+  external_name     text,                          -- название из источника
+  confidence        numeric     NOT NULL,          -- 0..1
+  tier              text        NOT NULL,          -- 'high' | 'medium' | 'low'
+  match_method      text        NOT NULL,          -- 'name' | 'name+volume' | 'alias' …
+  reasons           jsonb,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (source_product_id, candidate_ean)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ean_cand_product ON scrape.inn_skin_ean_candidates (source_product_id);
+CREATE INDEX IF NOT EXISTS idx_ean_cand_tier    ON scrape.inn_skin_ean_candidates (tier);
+CREATE INDEX IF NOT EXISTS idx_ean_cand_conf    ON scrape.inn_skin_ean_candidates (confidence DESC);

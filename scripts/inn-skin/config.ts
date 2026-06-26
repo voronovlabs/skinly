@@ -34,6 +34,27 @@ export const TARGET_BRANDS: string[] = [
   "Catrice",
 ];
 
+/**
+ * Бренд-запросы для barcode-list.ru EAN-обогащения (этап 2, отдельно от
+ * inn-skin скрейпа). Строки — ТОЧНО как ищем на barcode-list.ru; они
+ * отличаются от inn-skin TARGET_BRANDS (например «EAU THERMALE AVENE»).
+ */
+export const BARCODE_LIST_BRANDS: string[] = [
+  "EAU THERMALE AVENE",
+  "Uriage",
+  "Ducray",
+  "A-Derma",
+  "COSRX",
+  "Holika Holika",
+  "Missha",
+  "Dr.Jart+",
+  "SOME BY MI",
+  "HADA LABO",
+  "KIKO MILANO",
+  "Catrice",
+  "Sesderma",
+];
+
 /** Браузероподобные заголовки — вежливый скрейп SSR-страниц. */
 export const REQUEST_HEADERS: Record<string, string> = {
   "User-Agent":
