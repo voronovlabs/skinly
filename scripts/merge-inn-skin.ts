@@ -76,38 +76,139 @@ async function main(): Promise<void> {
   const rawN = n(counts[0]?.raw);
   const normN = n(counts[0]?.norm);
 
-  /* ── классификация по сценарию слияния ── */
-  const buckets = await prisma.$queryRaw<
-    {
-      eligible_ean: bigint;
-      matched_high: bigint;
-      matched_low: bigint;
-      would_new: bigint;
-    }[]
-  >(Prisma.sql`
-    WITH m AS (
-      SELECT
-        nrm.source_product_id,
-        nrm.has_valid_ean,
-        p.sim
-      FROM scrape.inn_skin_products_normalized nrm
-      LEFT JOIN LATERAL (
-        SELECT similarity(dm.name_key(pr.name), coalesce(nrm.name_key,'')) AS sim
-        FROM "Product" pr
-        WHERE coalesce(nrm.brand_key,'') <> ''
-          AND dm.brand_key(pr.brand) = nrm.brand_key
-        ORDER BY similarity(dm.name_key(pr.name), coalesce(nrm.name_key,'')) DESC NULLS LAST
-        LIMIT 1
-      ) p ON true
-    )
-    SELECT
-      count(*) FILTER (WHERE has_valid_ean)                              AS eligible_ean,
-      count(*) FILTER (WHERE NOT has_valid_ean AND sim >= ${HIGH})       AS matched_high,
-      count(*) FILTER (WHERE NOT has_valid_ean AND sim >= ${LOW} AND sim < ${HIGH}) AS matched_low,
-      count(*) FILTER (WHERE NOT has_valid_ean AND (sim IS NULL OR sim < ${LOW}))   AS would_new
-    FROM m
-  `);
-  const b = buckets[0];
+  /* ──────────────────────────────────────────────────────────────────────
+   * Bounded matching (быстро, без зависаний).
+   *
+   * Старый путь делал LATERAL по всему "Product" (62k) с пересчётом
+   * dm.brand_key/dm.name_key и ORDER BY similarity ДЛЯ КАЖДОЙ staging-строки
+   * → O(rows × каталог) + сортировки → зависание.
+   *
+   * Новый путь:
+   *   1. ОДИН проход по Product → temp-пул кандидатов, ограниченный реально
+   *      встречающимися brand_key (из staging) и капом 500 строк на бренд.
+   *   2. 24 staging-строки матчатся против КРОШЕЧНОГО пула, а не каталога.
+   * Всё в одной транзакции (temp-таблицы живут до COMMIT) + statement_timeout
+   * как страховка от зависания.
+   *
+   * (Опциональный буст на будущее, если каталог сильно вырастет:
+   *  CREATE INDEX ON "Product" (dm.brand_key(brand)); — тогда п.1 пойдёт по
+   *  индексу. Сейчас не добавляем, чтобы не трогать витрину.)
+   * ────────────────────────────────────────────────────────────────────── */
+  type BucketRow = {
+    eligible_ean: bigint;
+    matched_high: bigint;
+    matched_low: bigint;
+    would_new: bigint;
+  };
+  type MatchRow = {
+    staged: string | null;
+    product: string | null;
+    p_brand: string | null;
+    sim: number | null;
+  };
+
+  let b: BucketRow | undefined;
+  let matches: MatchRow[] = [];
+
+  if (normN === 0) {
+    ts("[merge inn-skin] staging пуст — сначала scrape + normalize. Матчинг пропущен.");
+  } else {
+    const tStart = Date.now();
+    try {
+      const out = await prisma.$transaction(
+        async (tx) => {
+          // Страховка: не висеть дольше 20с — упасть с понятной ошибкой.
+          await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = '20000'`);
+
+          // Пул кандидатов: один seq-scan Product, фильтр по brand_key из
+          // staging, кап 500 строк на бренд. name_key считаем только для
+          // выживших строк (после фильтра и капа).
+          await tx.$executeRawUnsafe(`
+            CREATE TEMP TABLE _inn_cand ON COMMIT DROP AS
+            WITH involved AS (
+              SELECT DISTINCT brand_key
+              FROM scrape.inn_skin_products_normalized
+              WHERE coalesce(brand_key,'') <> ''
+            ),
+            scanned AS (
+              SELECT pr.id, pr.brand, pr.name, dm.brand_key(pr.brand) AS bkey
+              FROM "Product" pr
+              WHERE dm.brand_key(pr.brand) IN (SELECT brand_key FROM involved)
+            ),
+            capped AS (
+              SELECT id, brand, name, bkey,
+                     row_number() OVER (PARTITION BY bkey ORDER BY id DESC) AS rn
+              FROM scanned
+            )
+            SELECT id, brand, name, bkey, dm.name_key(name) AS nkey
+            FROM capped
+            WHERE rn <= 500
+          `);
+
+          // Лучшее совпадение для каждой staging-строки против мелкого пула.
+          await tx.$executeRawUnsafe(`
+            CREATE TEMP TABLE _inn_match ON COMMIT DROP AS
+            SELECT
+              nrm.source_product_id,
+              nrm.has_valid_ean,
+              nrm.product_name_normalized,
+              m.name  AS product_name,
+              m.brand AS product_brand,
+              m.sim
+            FROM scrape.inn_skin_products_normalized nrm
+            LEFT JOIN LATERAL (
+              SELECT c.name, c.brand,
+                     similarity(c.nkey, coalesce(nrm.name_key,'')) AS sim
+              FROM _inn_cand c
+              WHERE coalesce(nrm.brand_key,'') <> ''
+                AND c.bkey = nrm.brand_key
+              ORDER BY similarity(c.nkey, coalesce(nrm.name_key,'')) DESC NULLS LAST
+              LIMIT 1
+            ) m ON true
+          `);
+
+          const candCount = await tx.$queryRaw<{ cnt: bigint }[]>(
+            Prisma.sql`SELECT count(*) AS cnt FROM _inn_cand`,
+          );
+          ts(`[merge inn-skin] candidate pool: ${n(candCount[0]?.cnt)} Product rows`);
+
+          const bucketRows = await tx.$queryRaw<BucketRow[]>(Prisma.sql`
+            SELECT
+              count(*) FILTER (WHERE has_valid_ean)                              AS eligible_ean,
+              count(*) FILTER (WHERE NOT has_valid_ean AND sim >= ${HIGH})       AS matched_high,
+              count(*) FILTER (WHERE NOT has_valid_ean AND sim >= ${LOW} AND sim < ${HIGH}) AS matched_low,
+              count(*) FILTER (WHERE NOT has_valid_ean AND (sim IS NULL OR sim < ${LOW}))   AS would_new
+            FROM _inn_match
+          `);
+
+          const matchRows = await tx.$queryRaw<MatchRow[]>(Prisma.sql`
+            SELECT
+              product_name_normalized AS staged,
+              product_name            AS product,
+              product_brand           AS p_brand,
+              sim
+            FROM _inn_match
+            WHERE sim >= ${LOW}
+            ORDER BY sim DESC NULLS LAST
+            LIMIT ${args.examples}
+          `);
+
+          return { bucketRows, matchRows };
+        },
+        { timeout: 25_000, maxWait: 5_000 },
+      );
+
+      b = out.bucketRows[0];
+      matches = out.matchRows;
+      ts(`[merge inn-skin] matching done in ${Date.now() - tStart}ms`);
+    } catch (e) {
+      ts(
+        `[merge inn-skin] матчинг прерван (${Date.now() - tStart}ms): ${
+          e instanceof Error ? e.message : String(e)
+        }. Печатаю отчёт без блока совпадений.`,
+      );
+    }
+  }
 
   /* ── INCI quality ── */
   const inci = await prisma.$queryRaw<
@@ -146,34 +247,7 @@ async function main(): Promise<void> {
     LIMIT ${args.examples}
   `);
 
-  /* ── 5 примеров совпадений с Product ── */
-  const matches = await prisma.$queryRaw<
-    {
-      staged: string | null;
-      product: string | null;
-      p_brand: string | null;
-      sim: number | null;
-    }[]
-  >(Prisma.sql`
-    SELECT
-      nrm.product_name_normalized AS staged,
-      p.name  AS product,
-      p.brand AS p_brand,
-      p.sim
-    FROM scrape.inn_skin_products_normalized nrm
-    JOIN LATERAL (
-      SELECT pr.name, pr.brand,
-             similarity(dm.name_key(pr.name), coalesce(nrm.name_key,'')) AS sim
-      FROM "Product" pr
-      WHERE coalesce(nrm.brand_key,'') <> ''
-        AND dm.brand_key(pr.brand) = nrm.brand_key
-      ORDER BY similarity(dm.name_key(pr.name), coalesce(nrm.name_key,'')) DESC NULLS LAST
-      LIMIT 1
-    ) p ON true
-    WHERE p.sim >= ${LOW}
-    ORDER BY p.sim DESC
-    LIMIT ${args.examples}
-  `);
+  /* (примеры совпадений уже посчитаны выше в одной транзакции — `matches`) */
 
   /* ── печать отчёта ── */
   log("");
