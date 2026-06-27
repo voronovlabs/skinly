@@ -146,3 +146,29 @@ CREATE TABLE IF NOT EXISTS scrape.inn_skin_ean_candidates (
 CREATE INDEX IF NOT EXISTS idx_ean_cand_product ON scrape.inn_skin_ean_candidates (source_product_id);
 CREATE INDEX IF NOT EXISTS idx_ean_cand_tier    ON scrape.inn_skin_ean_candidates (tier);
 CREATE INDEX IF NOT EXISTS idx_ean_cand_conf    ON scrape.inn_skin_ean_candidates (confidence DESC);
+
+-- ── Care to Beauty · ВЫДЕЛЕННЫЙ staging (намеренно НЕ универсальный) ─────────
+-- Полный слепок данных Care to Beauty для последующего анализа/merge. Это
+-- ОТДЕЛЬНАЯ от external_product_identifiers таблица: GTIN-поток в общий пул
+-- продолжает работать как раньше, а здесь копим ВСЁ, что отдаёт источник
+-- (название, бренд, картинка, INCI, описание, объём, категория). Значения
+-- складываем СЫРЫМИ, без нормализации. В Product НИЧЕГО не уходит.
+CREATE TABLE IF NOT EXISTS scrape.caretobeauty_products (
+  id              bigserial   PRIMARY KEY,
+  ean             text        NOT NULL,
+  brand           text,
+  product_name    text,
+  image_url       text,
+  ingredients_raw text,
+  description     text,
+  volume          text,
+  category        text,
+  source_url      text,
+  raw_payload     jsonb,
+  scraped_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (ean)
+);
+
+CREATE INDEX IF NOT EXISTS idx_c2b_brand ON scrape.caretobeauty_products (brand);
+CREATE INDEX IF NOT EXISTS idx_c2b_name  ON scrape.caretobeauty_products (product_name);

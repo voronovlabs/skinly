@@ -1,24 +1,20 @@
 /**
- * Skinly · адаптер источника · Care to Beauty → scrape.external_product_identifiers
+ * Skinly · адаптер источника · Care to Beauty
  *
- * Ещё один EAN-адаптер в УНИВЕРСАЛЬНЫЙ пул (source='caretobeauty'). Care to
- * Beauty отдаёт GTIN прямо в `<meta property="product:gtin">`, поэтому это
- * один из самых чистых источников.
+ * ДВА staging-приёмника, оба пополняются за один проход:
+ *   1) scrape.external_product_identifiers (source='caretobeauty') — GTIN-поток,
+ *      работает РОВНО как раньше (его не трогаем по контракту);
+ *   2) scrape.caretobeauty_products — ВЫДЕЛЕННЫЙ полный слепок Care to Beauty
+ *      (название/бренд/картинка/INCI/описание/объём/категория), сырьём.
  *
- * Алгоритм (без хрупких CSS-селекторов):
- *   1. Берём бренды из scrape.inn_skin_products_normalized (или --brand / дефолт).
- *   2. Тянем product-sitemap магазина (gz) → все URL товаров.
- *   3. Фильтруем URL по slug'у бренда (URL начинается с `/us/<brand-slug>-`).
- *   4. Качаем каждую страницу, вытаскиваем product:gtin + og:brand + og:title.
- *   5. Валидируем EAN по контрольной сумме (reuse isValidEan из farera).
- *   6. Upsert в external_product_identifiers с source='caretobeauty'.
+ * Перечисление — через product-sitemap (gz), отбор по slug'у бренда. По
+ * умолчанию сканируем ТОЛЬКО разрешённый список брендов (не весь sitemap).
  *
- * Запуск (через tools-контейнер):
+ * Запуск (tools-контейнер):
  *   npm run scrape:caretobeauty
- *   npm run scrape:caretobeauty -- --brand "Uriage" --max-per-brand 200
- *   npm run scrape:caretobeauty -- --limit 50 --debug
+ *   npm run scrape:caretobeauty -- --brand "Uriage" --max-per-brand 200 --debug
  *
- * НИЧЕГО не пишет в Product. unique остаётся (source, ean).
+ * НИЧЕГО не пишет в Product. unique: external (source,ean), c2b (ean).
  */
 
 import { randomUUID } from "node:crypto";
@@ -27,14 +23,16 @@ import { Prisma } from "@prisma/client";
 import { isValidEan } from "./farera/barcode-list";
 import { closeDb, ensureSchema, getPrisma } from "./inn-skin/storage";
 import {
+  ALLOWED_BRANDS,
   BASE_URL,
-  DEFAULT_BRANDS,
   DEFAULT_STORE,
   MAX_SITEMAP_PARTS,
-  brandSlug,
   productSitemapUrl,
+  specForBrand,
+  type BrandSpec,
 } from "./caretobeauty/config";
 import { fetchHtml, fetchSitemapXml, FetchError } from "./caretobeauty/client";
+import { decodeEntities, parseProduct } from "./caretobeauty/parser";
 
 const SOURCE = "caretobeauty";
 const log = (m: string) => console.log(`[${new Date().toISOString()}] ${m}`);
@@ -42,9 +40,9 @@ const log = (m: string) => console.log(`[${new Date().toISOString()}] ${m}`);
 /* ───────── CLI ───────── */
 
 interface CliArgs {
-  brands: string[] | null;
+  brands: BrandSpec[];
   store: string;
-  limit: number; // 0 = без общего лимита
+  limit: number;
   maxPerBrand: number;
   debug: boolean;
 }
@@ -59,14 +57,17 @@ function parseCli(): CliArgs {
     },
   });
   const brandVals = (values.brand as string[] | undefined) ?? [];
-  const brands = brandVals
+  const names = brandVals
     .flatMap((b) => b.split("||"))
     .map((b) => b.trim())
     .filter(Boolean);
+  // Дефолт — РОВНО разрешённый список. --brand → резолвим в spec (с slug-map).
+  const brands = names.length ? names.map(specForBrand) : ALLOWED_BRANDS;
+
   const limit = parseInt(String(values.limit), 10);
   const maxPerBrand = parseInt(String(values["max-per-brand"]), 10);
   return {
-    brands: brands.length ? brands : null,
+    brands,
     store: String(values.store),
     limit: Number.isFinite(limit) && limit > 0 ? limit : 0,
     maxPerBrand: Number.isFinite(maxPerBrand) && maxPerBrand > 0 ? maxPerBrand : 400,
@@ -74,63 +75,18 @@ function parseCli(): CliArgs {
   };
 }
 
-/* ───────── HTML meta extraction (no brittle selectors) ───────── */
-
-function decodeEntities(s: string): string {
-  return s
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#0?39;|&apos;/g, "'")
-    .replace(/&#x([0-9a-f]+);/gi, (_m, h) => String.fromCodePoint(parseInt(h, 16)))
-    .replace(/&#(\d+);/g, (_m, d) => String.fromCodePoint(parseInt(d, 10)));
-}
-
-/** Достаёт content из <meta property="<prop>" ...>, независимо от порядка атрибутов. */
-function metaContent(html: string, prop: string): string | null {
-  const propEsc = prop.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const tagRe = new RegExp(`<meta\\b[^>]*\\bproperty=["']${propEsc}["'][^>]*>`, "i");
-  const tag = tagRe.exec(html)?.[0];
-  if (!tag) return null;
-  const c = /\bcontent=["']([^"']*)["']/i.exec(tag);
-  return c ? decodeEntities(c[1]).trim() : null;
-}
-
-interface ProductFields {
-  gtin: string | null;
-  brand: string | null;
-  name: string | null;
-  url: string | null;
-  image: string | null;
-  itemGroupId: string | null;
-  retailerItemId: string | null;
-}
-function parseProduct(html: string, fallbackUrl: string): ProductFields {
-  return {
-    gtin: metaContent(html, "product:gtin"),
-    brand: metaContent(html, "og:brand"),
-    name: metaContent(html, "og:title"),
-    url: metaContent(html, "og:url") ?? fallbackUrl,
-    image: metaContent(html, "og:image"),
-    itemGroupId: metaContent(html, "product:item_group_id"),
-    retailerItemId: metaContent(html, "product:retailer_item_id"),
-  };
-}
-
-/* ───────── sitemap enumeration ───────── */
+/* ───────── sitemap ───────── */
 
 const LOC_RE = /<loc>([^<]+)<\/loc>/gi;
 
 async function loadProductUrls(store: string): Promise<string[]> {
   const urls: string[] = [];
   for (let part = 1; part <= MAX_SITEMAP_PARTS; part++) {
-    const sm = productSitemapUrl(store, part);
     let xml: string;
     try {
-      xml = await fetchSitemapXml(sm, log);
+      xml = await fetchSitemapXml(productSitemapUrl(store, part), log);
     } catch (e) {
-      if (e instanceof FetchError && e.status === 404) break; // частей больше нет
+      if (e instanceof FetchError && e.status === 404) break;
       log(`[c2b] sitemap part ${part} fail: ${e instanceof Error ? e.message : e}`);
       break;
     }
@@ -150,79 +106,63 @@ async function loadProductUrls(store: string): Promise<string[]> {
   return urls;
 }
 
-/** Путь URL начинается со slug'а бренда: `/us/<slug>-...`. */
-function urlMatchesBrand(url: string, store: string, slug: string): boolean {
+function urlMatchesBrand(url: string, store: string, slugs: string[]): boolean {
   try {
     const path = new URL(url).pathname.toLowerCase();
-    return path.startsWith(`/${store}/${slug}-`);
+    return slugs.some((s) => path.startsWith(`/${store}/${s}-`));
   } catch {
     return false;
   }
-}
-
-/* ───────── brands source ───────── */
-
-async function resolveBrands(args: CliArgs): Promise<string[]> {
-  if (args.brands) return args.brands;
-  const prisma = getPrisma();
-  try {
-    const rows = await prisma.$queryRaw<{ brand_normalized: string | null }[]>(
-      Prisma.sql`
-        SELECT DISTINCT brand_normalized
-        FROM scrape.inn_skin_products_normalized
-        WHERE coalesce(brand_normalized,'') <> ''
-      `,
-    );
-    const brands = rows
-      .map((r) => r.brand_normalized)
-      .filter((b): b is string => !!b);
-    if (brands.length) return brands;
-  } catch {
-    /* таблицы ещё нет */
-  }
-  log("[c2b] inn-skin staging пуст → беру дефолтный список брендов");
-  return DEFAULT_BRANDS;
 }
 
 /* ───────── stats ───────── */
 
 interface BrandStat {
   brand: string;
-  slug: string;
-  urlsMatched: number;
+  urls: number;
   fetched: number;
-  validEan: number;
-  invalidOrMissing: number;
+  ean: number;
+  image: number;
+  ingredients: number;
+  description: number;
+  volume: number;
   saved: number;
+}
+interface Sample {
+  brand: string;
+  name: string;
+  ean: string;
+  img: boolean;
+  inci: boolean;
+  desc: boolean;
+  vol: string | null;
 }
 
 async function main(): Promise<void> {
   const args = parseCli();
-  log(`[scrape caretobeauty] store=${args.store} limit=${args.limit || "∞"} maxPerBrand=${args.maxPerBrand}`);
+  log(`[scrape caretobeauty] store=${args.store} brands=${args.brands.length} limit=${args.limit || "∞"} maxPerBrand=${args.maxPerBrand}`);
+  log(`scope: ${args.brands.map((b) => `${b.brand}[${b.slugs.join("|")}]`).join(", ")}`);
 
   await ensureSchema(log);
   const prisma = getPrisma();
-
-  const brands = await resolveBrands(args);
-  const slugMap = brands.map((b) => ({ brand: b, slug: brandSlug(b) }));
-  log(`бренды (${brands.length}): ${slugMap.map((s) => `${s.brand}→${s.slug}`).join(", ")}`);
 
   log("[c2b] загружаю product-sitemap…");
   const allUrls = await loadProductUrls(args.store);
   log(`[c2b] всего товаров в sitemap: ${allUrls.length}`);
 
   const stats: BrandStat[] = [];
-  const examples: { brand: string; name: string; ean: string }[] = [];
+  const samples: Sample[] = [];
   let fetchedTotal = 0;
 
-  for (const { brand, slug } of slugMap) {
+  for (const spec of args.brands) {
     const st: BrandStat = {
-      brand, slug, urlsMatched: 0, fetched: 0, validEan: 0, invalidOrMissing: 0, saved: 0,
+      brand: spec.brand, urls: 0, fetched: 0, ean: 0, image: 0,
+      ingredients: 0, description: 0, volume: 0, saved: 0,
     };
-    const matched = allUrls.filter((u) => urlMatchesBrand(u, args.store, slug));
-    st.urlsMatched = matched.length;
-
+    const matched = allUrls.filter((u) => urlMatchesBrand(u, args.store, spec.slugs));
+    st.urls = matched.length;
     const cap = Math.min(matched.length, args.maxPerBrand);
+
     for (let i = 0; i < cap; i++) {
       if (args.limit && fetchedTotal >= args.limit) break;
       const url = matched[i];
@@ -232,19 +172,23 @@ async function main(): Promise<void> {
         fetchedTotal++;
         const p = parseProduct(html, url);
 
-        if (!p.gtin || !isValidEan(p.gtin)) {
-          st.invalidOrMissing++;
-          if (args.debug) log(`[MISS] ${url} gtin=${p.gtin ?? "—"}`);
+        if (!p.ean || !isValidEan(p.ean)) {
+          if (args.debug) log(`[MISS-EAN] ${url} gtin=${p.ean ?? "—"}`);
           continue;
         }
-        st.validEan++;
+        st.ean++;
+        if (p.imageUrl) st.image++;
+        if (p.ingredientsRaw) st.ingredients++;
+        if (p.description) st.description++;
+        if (p.volume) st.volume++;
 
+        // (1) GTIN-поток в общий пул — БЕЗ ИЗМЕНЕНИЙ.
         await prisma.$executeRaw(Prisma.sql`
           INSERT INTO scrape.external_product_identifiers (
             id, source, source_query, source_url, ean, product_name,
             brand_guess, normalized_name_key, raw_payload, scraped_at, updated_at
           ) VALUES (
-            ${randomUUID()}, ${SOURCE}, ${brand}, ${p.url}, ${p.gtin},
+            ${randomUUID()}, ${SOURCE}, ${spec.brand}, ${p.url}, ${p.ean},
             ${p.name}, ${p.brand}, dm.name_key(${p.name}),
             ${JSON.stringify(p)}::jsonb, now(), now()
           )
@@ -257,20 +201,48 @@ async function main(): Promise<void> {
             raw_payload         = EXCLUDED.raw_payload,
             updated_at          = now()
         `);
+
+        // (2) Выделенный полный staging Care to Beauty.
+        // COALESCE(NULLIF(...)) — НИКОГДА не затираем непустое поле пустым.
+        await prisma.$executeRaw(Prisma.sql`
+          INSERT INTO scrape.caretobeauty_products (
+            ean, brand, product_name, image_url, ingredients_raw, description,
+            volume, category, source_url, raw_payload, scraped_at, updated_at
+          ) VALUES (
+            ${p.ean}, ${p.brand}, ${p.name}, ${p.imageUrl}, ${p.ingredientsRaw},
+            ${p.description}, ${p.volume}, ${p.category}, ${p.url},
+            ${JSON.stringify(p)}::jsonb, now(), now()
+          )
+          ON CONFLICT (ean) DO UPDATE SET
+            brand           = COALESCE(NULLIF(EXCLUDED.brand,''),           scrape.caretobeauty_products.brand),
+            product_name    = COALESCE(NULLIF(EXCLUDED.product_name,''),    scrape.caretobeauty_products.product_name),
+            image_url       = COALESCE(NULLIF(EXCLUDED.image_url,''),       scrape.caretobeauty_products.image_url),
+            ingredients_raw = COALESCE(NULLIF(EXCLUDED.ingredients_raw,''), scrape.caretobeauty_products.ingredients_raw),
+            description     = COALESCE(NULLIF(EXCLUDED.description,''),      scrape.caretobeauty_products.description),
+            volume          = COALESCE(NULLIF(EXCLUDED.volume,''),          scrape.caretobeauty_products.volume),
+            category        = COALESCE(NULLIF(EXCLUDED.category,''),        scrape.caretobeauty_products.category),
+            source_url      = COALESCE(NULLIF(EXCLUDED.source_url,''),      scrape.caretobeauty_products.source_url),
+            raw_payload     = EXCLUDED.raw_payload,
+            updated_at      = now()
+        `);
         st.saved++;
-        if (examples.length < 5 && p.name) {
-          examples.push({ brand, name: p.name, ean: p.gtin });
+
+        if (samples.length < 5 && p.name) {
+          samples.push({
+            brand: spec.brand, name: p.name, ean: p.ean,
+            img: !!p.imageUrl, inci: !!p.ingredientsRaw,
+            desc: !!p.description, vol: p.volume,
+          });
         }
       } catch (e) {
-        st.invalidOrMissing++;
         log(`[FAIL] ${url}: ${e instanceof Error ? e.message : e}`);
       }
     }
 
     stats.push(st);
     log(
-      `[BRAND] "${brand}" (${slug}) urls=${st.urlsMatched} fetched=${st.fetched} ` +
-        `validEAN=${st.validEan} invalid/missing=${st.invalidOrMissing} saved=${st.saved}`,
+      `[BRAND] "${spec.brand}" urls=${st.urls} fetched=${st.fetched} EAN=${st.ean} ` +
+        `img=${st.image} inci=${st.ingredients} desc=${st.description} vol=${st.volume} saved=${st.saved}`,
     );
     if (args.limit && fetchedTotal >= args.limit) {
       log(`[c2b] достигнут общий --limit ${args.limit}, стоп`);
@@ -280,36 +252,43 @@ async function main(): Promise<void> {
 
   /* ── отчёт ── */
   log("");
-  log("════════════ Care to Beauty · GTIN ENRICHMENT REPORT ════════════");
-  log(`store=${args.store} · товаров в sitemap=${allUrls.length} · base=${BASE_URL}`);
+  log("════════════ Care to Beauty · STAGING REPORT ════════════");
+  log(`store=${args.store} · sitemap=${allUrls.length} товаров · base=${BASE_URL}`);
   log("");
-  log("по брендам (URL в sitemap / fetched / valid EAN / invalid|missing / saved):");
+  log("по брендам (urls / fetched / EAN / image / ingredients / description / volume):");
   log(
-    "  " + "BRAND".padEnd(20) + "urls".padStart(7) + "fetch".padStart(7) +
-      "valid".padStart(7) + "inv/miss".padStart(10) + "saved".padStart(7),
+    "  " + "BRAND".padEnd(16) + "urls".padStart(6) + "fetch".padStart(6) +
+      "ean".padStart(5) + "img".padStart(5) + "inci".padStart(6) +
+      "desc".padStart(6) + "vol".padStart(5),
   );
-  let tUrls = 0, tFetch = 0, tValid = 0, tInv = 0, tSaved = 0;
+  const t = { urls: 0, fetched: 0, ean: 0, image: 0, ingredients: 0, description: 0, volume: 0 };
   for (const s of stats) {
     log(
-      "  " + s.brand.padEnd(20) + String(s.urlsMatched).padStart(7) +
-        String(s.fetched).padStart(7) + String(s.validEan).padStart(7) +
-        String(s.invalidOrMissing).padStart(10) + String(s.saved).padStart(7),
+      "  " + s.brand.padEnd(16) + String(s.urls).padStart(6) + String(s.fetched).padStart(6) +
+        String(s.ean).padStart(5) + String(s.image).padStart(5) + String(s.ingredients).padStart(6) +
+        String(s.description).padStart(6) + String(s.volume).padStart(5),
     );
-    tUrls += s.urlsMatched; tFetch += s.fetched; tValid += s.validEan;
-    tInv += s.invalidOrMissing; tSaved += s.saved;
+    t.urls += s.urls; t.fetched += s.fetched; t.ean += s.ean; t.image += s.image;
+    t.ingredients += s.ingredients; t.description += s.description; t.volume += s.volume;
   }
-  log("  " + "—".repeat(58));
+  log("  " + "—".repeat(55));
   log(
-    "  " + "TOTAL".padEnd(20) + String(tUrls).padStart(7) + String(tFetch).padStart(7) +
-      String(tValid).padStart(7) + String(tInv).padStart(10) + String(tSaved).padStart(7),
+    "  " + "TOTAL".padEnd(16) + String(t.urls).padStart(6) + String(t.fetched).padStart(6) +
+      String(t.ean).padStart(5) + String(t.image).padStart(5) + String(t.ingredients).padStart(6) +
+      String(t.description).padStart(6) + String(t.volume).padStart(5),
   );
   log("");
-  log("примеры (до 5):");
-  if (examples.length === 0) log("  (нет)");
-  for (const e of examples) log(`  • [${e.brand}] ${trunc(e.name, 50)} → ${e.ean}`);
+  log("5 примеров строк:");
+  if (samples.length === 0) log("  (нет)");
+  for (const s of samples) {
+    log(
+      `  • [${s.brand}] ${trunc(s.name, 44)} | ean=${s.ean} | ` +
+        `img=${s.img ? "y" : "n"} inci=${s.inci ? "y" : "n"} desc=${s.desc ? "y" : "n"} vol=${s.vol ?? "—"}`,
+    );
+  }
   log("");
-  log("ПОЛИТИКА: 0 записей в Product. Только staging (external_product_identifiers).");
-  log("════════════════════════════════════════════════════════════════");
+  log("ПОЛИТИКА: 0 записей в Product. Чистый staging (external_product_identifiers + caretobeauty_products).");
+  log("══════════════════════════════════════════════════════════");
 }
 
 function trunc(s: string, n: number): string {

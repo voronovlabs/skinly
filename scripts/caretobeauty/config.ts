@@ -53,24 +53,47 @@ export function brandSlug(brand: string): string {
 }
 
 /**
- * Бренды по умолчанию, если в staging ещё нет inn-skin товаров и не передан
- * --brand. Это те же целевые бренды каталога.
+ * Разрешённый список брендов (scope текущего скана) + slug'и Care to Beauty.
+ *
+ * `slugs` — кандидаты префиксов URL товара (`/us/<slug>-...`). Их несколько,
+ * потому что написание на сайте может отличаться от названия бренда
+ * (Avène→avene, ma:nyo→manyo, Dr.Jart+→dr-jart …). URL матчится, если
+ * начинается с ЛЮБОГО из slug'ов. Это и есть «brand slug mapping».
+ *
+ * ВАЖНО: по умолчанию сканируем ТОЛЬКО эти бренды (не весь 27k sitemap).
  */
-export const DEFAULT_BRANDS: string[] = [
-  "Uriage",
-  "Avène",
-  "Ducray",
-  "A-Derma",
-  "Bioderma",
-  "La Roche-Posay",
-  "CeraVe",
-  "COSRX",
-  "Dr.Jart+",
-  "Some By Mi",
-  "Skin1004",
-  "Hada Labo",
-  "KIKO Milano",
-  "Sesderma",
-  "Holika Holika",
-  "Missha",
+export interface BrandSpec {
+  brand: string;
+  slugs: string[];
+}
+
+export const ALLOWED_BRANDS: BrandSpec[] = [
+  { brand: "CeraVe", slugs: ["cerave"] },
+  { brand: "Avène", slugs: ["avene"] },
+  { brand: "Uriage", slugs: ["uriage"] },
+  { brand: "Ducray", slugs: ["ducray"] },
+  { brand: "A-Derma", slugs: ["a-derma"] },
+  { brand: "COSRX", slugs: ["cosrx"] },
+  { brand: "Skin1004", slugs: ["skin1004", "skin-1004"] },
+  { brand: "Holika Holika", slugs: ["holika-holika"] },
+  { brand: "Missha", slugs: ["missha"] },
+  { brand: "Dr.Jart+", slugs: ["dr-jart", "dr-jart-plus", "drjart"] },
+  { brand: "Some By Mi", slugs: ["some-by-mi"] },
+  { brand: "Hada Labo", slugs: ["hada-labo"] },
+  { brand: "KIKO Milano", slugs: ["kiko-milano", "kiko"] },
+  { brand: "Catrice", slugs: ["catrice"] },
+  { brand: "Manyo", slugs: ["manyo", "manyo-factory", "ma-nyo"] },
+  { brand: "Sesderma", slugs: ["sesderma"] },
 ];
+
+/**
+ * Резолвит свободную строку бренда (из --brand) в BrandSpec: ищем в
+ * ALLOWED_BRANDS по slug'у/имени, иначе — slug из самого имени.
+ */
+export function specForBrand(name: string): BrandSpec {
+  const key = brandSlug(name);
+  const found = ALLOWED_BRANDS.find(
+    (b) => b.slugs.includes(key) || brandSlug(b.brand) === key,
+  );
+  return found ?? { brand: name, slugs: [key] };
+}
