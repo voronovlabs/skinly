@@ -214,3 +214,35 @@ CREATE INDEX IF NOT EXISTS idx_c2bn_brand_key   ON scrape.caretobeauty_products_
 CREATE INDEX IF NOT EXISTS idx_c2bn_name_key    ON scrape.caretobeauty_products_normalized (name_key);
 CREATE INDEX IF NOT EXISTS idx_c2bn_product_key ON scrape.caretobeauty_products_normalized (product_key);
 CREATE INDEX IF NOT EXISTS idx_c2bn_ean         ON scrape.caretobeauty_products_normalized (ean);
+
+-- ── Care to Beauty · DRY-RUN MERGE кандидаты (анализ пересечения с Product) ──
+-- Результат сопоставления scrape.caretobeauty_products_normalized ↔ public."Product".
+-- ЧИСТО АНАЛИТИКА: ни одной записи в Product. Таблица пересоздаётся каждый
+-- dry-run. По одной (лучшей) строке-классификации на товар Care to Beauty.
+--   match_type: MATCH_BY_EAN | MATCH_BY_KEYS | FUZZY | NO_MATCH
+--   conflict:   overlay-флаг (EAN указывает на один Product, ключи — на другой;
+--               либо ключи совпали, но объём различается)
+CREATE TABLE IF NOT EXISTS scrape.caretobeauty_merge_candidates (
+  id              bigserial   PRIMARY KEY,
+  c2b_ref         text        NOT NULL,   -- caretobeauty source_ref (= ean)
+  ean             text,
+  brand_key       text,
+  name_key        text,
+  volume          text,
+  match_type      text        NOT NULL,
+  conflict        boolean     NOT NULL DEFAULT false,
+  product_id      text,                    -- public."Product".id (cuid), NULL если нет
+  product_barcode text,
+  product_brand   text,
+  product_name    text,
+  product_volume  text,
+  confidence      numeric     NOT NULL DEFAULT 0,  -- 0..1
+  reason          text,
+  comments        jsonb,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (c2b_ref)
+);
+
+CREATE INDEX IF NOT EXISTS idx_c2bmc_type     ON scrape.caretobeauty_merge_candidates (match_type);
+CREATE INDEX IF NOT EXISTS idx_c2bmc_conflict ON scrape.caretobeauty_merge_candidates (conflict);
+CREATE INDEX IF NOT EXISTS idx_c2bmc_product  ON scrape.caretobeauty_merge_candidates (product_id);
