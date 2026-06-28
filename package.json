@@ -28,6 +28,7 @@
     "scrape:caretobeauty": "tsx scripts/scrape-caretobeauty.ts",
     "normalize:caretobeauty": "tsx scripts/normalize-caretobeauty.ts",
     "merge:caretobeauty": "tsx scripts/merge-caretobeauty.ts",
+    "import:caretobeauty-products": "tsx scripts/import-caretobeauty-products.ts",
     "match:inn-skin-barcodes": "tsx scripts/match-inn-skin-barcodes.ts"
   },
   "dependencies": {
