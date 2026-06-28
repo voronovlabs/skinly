@@ -114,7 +114,20 @@ export async function normalizeSource(
       r.image_url,
       now()
     FROM ( ${opts.selectRaw} ) r
+    -- Политика обновления: КАЖДАЯ нормализация — это полный пересбор строки из
+    -- свежего источника (НЕ COALESCE-preserve). Поэтому:
+    --   • description / ingredients_raw / ingredients_normalized ВСЕГДА берутся
+    --     заново из source — включая NULL (если парсер не нашёл настоящий INCI
+    --     или описание), чтобы старые «грязные» значения автоматически чистились;
+    --   • остальные поля (raw brand/name + производные ключи brand_key/name_key/
+    --     product_key/category/volume) тоже перезаписываются — иначе raw и
+    --     производный ключ рассинхронизируются (нельзя preserve один без другого).
     ON CONFLICT (source_ref) DO UPDATE SET
+      -- ── всегда свежие из источника (перезапись, в т.ч. в NULL) ──
+      description             = EXCLUDED.description,
+      ingredients_raw         = EXCLUDED.ingredients_raw,
+      ingredients_normalized  = EXCLUDED.ingredients_normalized,
+      -- ── остальные поля: полный пересбор (raw + производные вместе) ──
       ean                     = EXCLUDED.ean,
       has_valid_ean           = EXCLUDED.has_valid_ean,
       brand                   = EXCLUDED.brand,
@@ -126,9 +139,6 @@ export async function normalizeSource(
       product_key             = EXCLUDED.product_key,
       volume                  = EXCLUDED.volume,
       category                = EXCLUDED.category,
-      ingredients_raw         = EXCLUDED.ingredients_raw,
-      ingredients_normalized  = EXCLUDED.ingredients_normalized,
-      description             = EXCLUDED.description,
       image_url               = EXCLUDED.image_url,
       updated_at              = now()
   `);
