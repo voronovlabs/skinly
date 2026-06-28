@@ -172,3 +172,45 @@ CREATE TABLE IF NOT EXISTS scrape.caretobeauty_products (
 
 CREATE INDEX IF NOT EXISTS idx_c2b_brand ON scrape.caretobeauty_products (brand);
 CREATE INDEX IF NOT EXISTS idx_c2b_name  ON scrape.caretobeauty_products (product_name);
+
+-- ── Care to Beauty · НОРМАЛИЗОВАННЫЙ staging (ПО-ИСТОЧНИКОВО) ────────────────
+-- Решение по архитектуре: общий ДВИЖОК нормализации (normalizeSource()), но
+-- РАЗДЕЛЬНЫЕ таблицы результата на каждый источник. Пара на источник:
+--     scrape.<source>_products            (raw)
+--     scrape.<source>_products_normalized (результат normalize)
+-- Объединение источников делает ОТДЕЛЬНЫЙ merge-слой, а не normalize.
+--
+-- Структура максимально повторяет scrape.inn_skin_products_normalized
+-- (brand_normalized/brand_key/product_name_normalized/name_key/category/
+-- image_url/ingredients_raw/ingredients_normalized/ean/has_valid_ean) плюс
+-- доступные у Care to Beauty поля (raw brand/name, product_key, volume,
+-- description). Это canonical-форма вывода движка для будущих источников.
+--
+-- Откат прошлой (отменённой) идеи единой таблицы:
+DROP TABLE IF EXISTS scrape.normalized_products;
+
+CREATE TABLE IF NOT EXISTS scrape.caretobeauty_products_normalized (
+  source_ref               text        PRIMARY KEY,  -- = ean (back-ptr на caretobeauty_products)
+  ean                      text,
+  has_valid_ean            boolean     NOT NULL DEFAULT false,
+  brand                    text,                       -- сырой
+  brand_normalized         text,                       -- dm.norm_brand
+  brand_key                text,                       -- dm.brand_key
+  name                     text,                       -- сырое название
+  product_name_normalized  text,                       -- dm.norm_name
+  name_key                 text,                       -- dm.name_key
+  product_key              text,                       -- 'bc:'||ean | 'nb:'||brand_key||'|'||name_key
+  volume                   text,                       -- raw volume | dm.extract_volume(name)
+  category                 text,                       -- ProductCategory enum (как text)
+  ingredients_raw          text,
+  ingredients_normalized   text[],                     -- dm.norm_ingredients
+  description              text,
+  image_url                text,
+  created_at               timestamptz NOT NULL DEFAULT now(),
+  updated_at               timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_c2bn_brand_key   ON scrape.caretobeauty_products_normalized (brand_key);
+CREATE INDEX IF NOT EXISTS idx_c2bn_name_key    ON scrape.caretobeauty_products_normalized (name_key);
+CREATE INDEX IF NOT EXISTS idx_c2bn_product_key ON scrape.caretobeauty_products_normalized (product_key);
+CREATE INDEX IF NOT EXISTS idx_c2bn_ean         ON scrape.caretobeauty_products_normalized (ean);

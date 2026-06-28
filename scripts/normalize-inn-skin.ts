@@ -24,6 +24,9 @@
 import { parseArgs } from "node:util";
 import { Prisma } from "@prisma/client";
 import { closeDb, ensureSchema, getPrisma } from "./inn-skin/storage";
+// Категория и логика нормализации — из ОБЩЕГО движка (один источник правды,
+// без дублирования). Тот же CATEGORY_CASE используют все нормализаторы.
+import { CATEGORY_CASE } from "./normalize/normalize-core";
 
 const log = (msg: string) =>
   console.log(`[${new Date().toISOString()}] ${msg}`);
@@ -42,29 +45,6 @@ function parseCli(): CliArgs {
   }
   return { limit };
 }
-
-/**
- * RU/EN-эвристика категории → ProductCategory enum (как text).
- * Специфичные правила раньше общих (eye/oil/mist до moisturizer).
- * Применяется к lower(category_raw || ' ' || product_name).
- */
-const CATEGORY_CASE = Prisma.raw(`
-  CASE
-    WHEN src ~ 'сыворотк|serum'                                   THEN 'SERUM'
-    WHEN src ~ 'эссенц|essence'                                   THEN 'ESSENCE'
-    WHEN src ~ 'тонер|тоник|toner'                                THEN 'TONER'
-    WHEN src ~ 'для глаз|крем для глаз|eye'                       THEN 'EYE_CREAM'
-    WHEN src ~ 'скраб|пилинг|эксфолиант|peel|scrub|exfoli'        THEN 'EXFOLIANT'
-    WHEN src ~ 'маска|маски|mask'                                 THEN 'MASK'
-    WHEN src ~ 'солнцезащит|spf|sunscreen|bariesun'               THEN 'SUNSCREEN'
-    WHEN src ~ 'масло|oil'                                        THEN 'OIL'
-    WHEN src ~ 'термальн|мист|спрей|мисты|mist|thermal|spray'     THEN 'MIST'
-    WHEN src ~ 'для губ|бальзам для губ|губ|lip'                  THEN 'LIP_CARE'
-    WHEN src ~ 'очищ|умыв|мицелляр|пенк|мыло|гель для|cleans|micellar|foam|cleansing' THEN 'CLEANSER'
-    WHEN src ~ 'крем|молочко|эмульс|увлажн|cream|milk|emulsion|moistur|lotion|bariederm' THEN 'MOISTURIZER'
-    ELSE 'OTHER'
-  END
-`);
 
 async function main(): Promise<void> {
   const args = parseCli();
