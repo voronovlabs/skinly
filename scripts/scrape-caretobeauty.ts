@@ -217,8 +217,11 @@ async function main(): Promise<void> {
             brand           = COALESCE(NULLIF(EXCLUDED.brand,''),           scrape.caretobeauty_products.brand),
             product_name    = COALESCE(NULLIF(EXCLUDED.product_name,''),    scrape.caretobeauty_products.product_name),
             image_url       = COALESCE(NULLIF(EXCLUDED.image_url,''),       scrape.caretobeauty_products.image_url),
-            ingredients_raw = COALESCE(NULLIF(EXCLUDED.ingredients_raw,''), scrape.caretobeauty_products.ingredients_raw),
-            description     = COALESCE(NULLIF(EXCLUDED.description,''),      scrape.caretobeauty_products.description),
+            -- description / ingredients_raw — это извлекаемые поля парсера:
+            -- при ре-скрейпе ПЕРЕЗАПИСЫВАЕМ (в т.ч. в NULL), чтобы чинить
+            -- старые «грязные» значения. NULL у ingredients = INCI не найден.
+            ingredients_raw = EXCLUDED.ingredients_raw,
+            description     = EXCLUDED.description,
             volume          = COALESCE(NULLIF(EXCLUDED.volume,''),          scrape.caretobeauty_products.volume),
             category        = COALESCE(NULLIF(EXCLUDED.category,''),        scrape.caretobeauty_products.category),
             source_url      = COALESCE(NULLIF(EXCLUDED.source_url,''),      scrape.caretobeauty_products.source_url),
