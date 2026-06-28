@@ -1,34 +1,33 @@
 /**
  * Skinly · DRY-RUN MERGE · Care to Beauty ↔ public."Product"
  *
- * Анализирует пересечение scrape.caretobeauty_products_normalized с текущим
- * каталогом public."Product" и складывает классификацию в
- * scrape.caretobeauty_merge_candidates. ЧИСТО АНАЛИТИКА:
- *   — НИ ОДНОГО INSERT/UPDATE/MERGE в Product;
- *   — ничего из существующих данных не меняется.
+ * Анализ пересечения scrape.caretobeauty_products_normalized с public."Product".
+ * ЧИСТО АНАЛИТИКА: ни одного INSERT/UPDATE/MERGE в Product.
  *
- * Переиспользует существующий механизм сопоставления (как в merge-inn-skin):
- *   • dm.brand_key / dm.name_key / dm.extract_volume / dm.is_valid_ean
- *   • pg_trgm similarity()  — функция похожести проекта (та же, что в поиске)
- *   • bounded candidate-pool в temp-таблице + statement_timeout (без скана 62k
- *     на каждую строку — защита от зависания).
+ * Два режима (fuzzy НЕ обязателен и по умолчанию ВЫКЛЮЧЕН):
+ *
+ *   БЫСТРЫЙ (default / --no-fuzzy):
+ *     1. MATCH_BY_EAN   — Product.barcode = c2b.ean (прямой индексный join)
+ *     2. MATCH_BY_KEYS  — brand_key + name_key (через temp-таблицу ключей Product)
+ *     3. NO_MATCH       — новый товар
+ *     БЕЗ pg_trgm, БЕЗ similarity. Пересоздаёт таблицу кандидатов.
+ *
+ *   FUZZY-only (--fuzzy-only):
+ *     апгрейдит ТОЛЬКО строки, оставшиеся NO_MATCH, через similarity() по
+ *     уже построенной temp-таблице ключей. Ограничен --fuzzy-limit.
+ *
+ * Оптимизация: dm.brand_key/dm.name_key/dm.extract_volume по Product считаются
+ * ОДИН раз → temp `_c2b_pkeys` (+ индексы). Дальше только exact joins; fuzzy —
+ * лишь по остатку. Тяжёлый similarity не блокирует основной отчёт.
  *
  * Запуск (tools-контейнер):
- *   npm run merge:caretobeauty -- --dry-run
- *   npm run merge:caretobeauty -- --dry-run --examples 20 --fuzzy 0.5
- *
- * Стадии сопоставления (по приоритету):
- *   1. MATCH_BY_EAN   caretobeauty.ean == Product.barcode        conf 1.00
- *   2. MATCH_BY_KEYS  brand_key+name_key совпали                 conf 0.90
- *        + volume совпал                                          conf 0.97
- *        + volume различается → conflict-overlay                  conf 0.70
- *   3. FUZZY          brand_key совпал, name_key похож (trgm)     conf 0.5..0.86
- *   4. NO_MATCH       нет кандидата → новый товар                 conf 0.00
- *   conflict — overlay-флаг (EAN→один Product, ключи→другой; либо объём разошёлся).
+ *   npm run merge:caretobeauty -- --dry-run --no-fuzzy            # быстро
+ *   npm run merge:caretobeauty -- --dry-run --fuzzy-only --fuzzy-limit 300
+ *   npm run merge:caretobeauty -- --dry-run --statement-timeout-ms 60000
  */
 
 import { parseArgs } from "node:util";
-import { Prisma } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { closeDb, ensureSchema, getPrisma } from "./inn-skin/storage";
 
 const log = (m: string) => console.log(m);
@@ -36,7 +35,11 @@ const ts = (m: string) => console.log(`[${new Date().toISOString()}] ${m}`);
 
 interface CliArgs {
   examples: number;
-  fuzzy: number;
+  fuzzyThreshold: number;
+  fuzzyOnly: boolean;
+  noFuzzy: boolean;
+  fuzzyLimit: number;
+  statementTimeoutMs: number;
   apply: boolean;
 }
 function parseCli(): CliArgs {
@@ -44,70 +47,78 @@ function parseCli(): CliArgs {
     options: {
       "dry-run": { type: "boolean", default: false }, // информативно; режим всегда dry
       apply: { type: "boolean", default: false },
+      "no-fuzzy": { type: "boolean", default: false },
+      "fuzzy-only": { type: "boolean", default: false },
+      "fuzzy-limit": { type: "string", default: "500" },
+      "fuzzy-threshold": { type: "string", default: "0.45" },
+      "statement-timeout-ms": { type: "string", default: "30000" },
       examples: { type: "string", default: "15" },
-      fuzzy: { type: "string", default: "0.45" },
     },
   });
-  const examples = parseInt(String(values.examples), 10);
-  const fuzzy = parseFloat(String(values.fuzzy));
+  const int = (v: unknown, d: number, min = 1): number => {
+    const x = parseInt(String(v), 10);
+    return Number.isFinite(x) && x >= min ? x : d;
+  };
+  const thr = parseFloat(String(values["fuzzy-threshold"]));
   return {
-    examples: Number.isFinite(examples) && examples > 0 ? examples : 15,
-    fuzzy: Number.isFinite(fuzzy) && fuzzy > 0 && fuzzy < 1 ? fuzzy : 0.45,
+    examples: int(values.examples, 15),
+    fuzzyThreshold: Number.isFinite(thr) && thr > 0 && thr < 1 ? thr : 0.45,
+    fuzzyOnly: Boolean(values["fuzzy-only"]),
+    noFuzzy: Boolean(values["no-fuzzy"]),
+    fuzzyLimit: int(values["fuzzy-limit"], 500),
+    statementTimeoutMs: int(values["statement-timeout-ms"], 30000, 1000),
     apply: Boolean(values.apply),
   };
 }
 
 const n = (v: bigint | number | null | undefined): number => Number(v ?? 0);
 
-async function main(): Promise<void> {
-  const args = parseCli();
-  if (args.apply) {
-    ts("[merge caretobeauty] --apply ЗАПРЕЩЁН на этом этапе. В Product ничего не пишется. Работаю как dry-run.");
-  }
-  ts("[merge caretobeauty] DRY-RUN — только анализ, без записи в Product");
+/* ───────── shared: temp product-keys pool (один раз) ───────── */
 
-  await ensureSchema(ts);
-  const prisma = getPrisma();
+async function buildProductKeys(
+  tx: Prisma.TransactionClient,
+): Promise<number> {
+  // dm.brand_key по Product считается ОДИН раз (фильтр по нужным брендам),
+  // dm.name_key/extract_volume — только для выживших строк.
+  await tx.$executeRawUnsafe(`
+    CREATE TEMP TABLE _c2b_pkeys ON COMMIT DROP AS
+    WITH involved AS (
+      SELECT DISTINCT brand_key
+      FROM scrape.caretobeauty_products_normalized
+      WHERE coalesce(brand_key,'') <> ''
+    )
+    SELECT p.id AS product_id, p.barcode,
+           dm.brand_key(p.brand)    AS brand_key,
+           dm.name_key(p.name)      AS name_key,
+           dm.extract_volume(p.name) AS volume,
+           p.name  AS product_name,
+           p.brand AS product_brand
+    FROM "Product" p
+    WHERE dm.brand_key(p.brand) IN (SELECT brand_key FROM involved)
+  `);
+  await tx.$executeRawUnsafe(`CREATE INDEX ON _c2b_pkeys (brand_key, name_key)`);
+  await tx.$executeRawUnsafe(`CREATE INDEX ON _c2b_pkeys (brand_key)`);
+  await tx.$executeRawUnsafe(`ANALYZE _c2b_pkeys`);
+  const r = await tx.$queryRaw<{ c: bigint }[]>(
+    Prisma.sql`SELECT count(*) AS c FROM _c2b_pkeys`,
+  );
+  return n(r[0]?.c);
+}
 
-  // Пересобираем таблицу кандидатов каждый прогон.
+/* ───────── fast: exact EAN + KEYS ───────── */
+
+async function runExact(prisma: PrismaClient, args: CliArgs): Promise<void> {
   await prisma.$executeRawUnsafe(`TRUNCATE TABLE scrape.caretobeauty_merge_candidates`);
 
-  const FUZZY = Prisma.raw(String(args.fuzzy)); // литерал в SQL (не bind-param)
-
-  const t0 = Date.now();
   await prisma.$transaction(
     async (tx) => {
-      await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = '90000'`);
+      await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = '${args.statementTimeoutMs}'`);
 
-      // ── Пул кандидатов: ОДИН проход по Product, только нужные brand_key,
-      //    кап 1000/бренд. dm.name_key/extract_volume считаем для выживших. ──
-      await tx.$executeRawUnsafe(`
-        CREATE TEMP TABLE _c2b_cand ON COMMIT DROP AS
-        WITH involved AS (
-          SELECT DISTINCT brand_key
-          FROM scrape.caretobeauty_products_normalized
-          WHERE coalesce(brand_key,'') <> ''
-        ),
-        scanned AS (
-          SELECT p.id, p.barcode, p.brand, p.name, dm.brand_key(p.brand) AS bkey
-          FROM "Product" p
-          WHERE dm.brand_key(p.brand) IN (SELECT brand_key FROM involved)
-        ),
-        capped AS (
-          SELECT id, barcode, brand, name, bkey,
-                 row_number() OVER (PARTITION BY bkey ORDER BY id DESC) AS rn
-          FROM scanned
-        )
-        SELECT id, barcode, brand, name, bkey,
-               dm.name_key(name) AS nkey, dm.extract_volume(name) AS pvol
-        FROM capped WHERE rn <= 1000
-      `);
-      const cnt = await tx.$queryRaw<{ c: bigint }[]>(
-        Prisma.sql`SELECT count(*) AS c FROM _c2b_cand`,
-      );
-      ts(`[merge caretobeauty] candidate pool (Product rows): ${n(cnt[0]?.c)}`);
+      let t = Date.now();
+      const pool = await buildProductKeys(tx);
+      ts(`[exact] product-keys pool=${pool} rows · ${Date.now() - t}ms`);
 
-      // ── Классификация + персист в candidates ──
+      t = Date.now();
       await tx.$executeRaw(Prisma.sql`
         INSERT INTO scrape.caretobeauty_merge_candidates (
           c2b_ref, ean, brand_key, name_key, volume, match_type, conflict,
@@ -115,108 +126,163 @@ async function main(): Promise<void> {
           confidence, reason, comments
         )
         SELECT
-          j.c2b_ref, j.ean, j.brand_key, j.name_key, j.volume,
-          j.match_type, j.conflict,
-          j.product_id, j.product_barcode, j.product_brand, j.product_name, j.product_volume,
-          j.confidence, j.reason,
+          c.source_ref, c.ean, c.brand_key, c.name_key, c.volume,
+          CASE WHEN em.id IS NOT NULL THEN 'MATCH_BY_EAN'
+               WHEN km.id IS NOT NULL THEN 'MATCH_BY_KEYS'
+               ELSE 'NO_MATCH' END,
+          CASE
+            WHEN em.id IS NOT NULL AND km.id IS NOT NULL AND km.id <> em.id THEN true
+            WHEN em.id IS NULL AND km.id IS NOT NULL
+                 AND coalesce(c.volume,'') <> '' AND coalesce(km.pvol,'') <> ''
+                 AND c.volume <> km.pvol THEN true
+            ELSE false END,
+          coalesce(em.id, km.id),
+          coalesce(em.barcode, km.barcode),
+          coalesce(em.brand, km.brand),
+          coalesce(em.name, km.name),
+          coalesce(em.pvol, km.pvol),
+          CASE
+            WHEN em.id IS NOT NULL THEN 1.00
+            WHEN km.id IS NOT NULL THEN
+              CASE WHEN coalesce(c.volume,'') <> '' AND coalesce(km.pvol,'') <> '' THEN
+                     CASE WHEN c.volume = km.pvol THEN 0.97 ELSE 0.70 END
+                   ELSE 0.90 END
+            ELSE 0.0 END,
+          CASE
+            WHEN em.id IS NOT NULL AND km.id IS NOT NULL AND km.id <> em.id
+              THEN 'EAN→' || em.id || ' но ключи→' || km.id
+            WHEN em.id IS NOT NULL THEN 'exact ean = barcode'
+            WHEN km.id IS NOT NULL AND coalesce(c.volume,'') <> '' AND coalesce(km.pvol,'') <> '' AND c.volume <> km.pvol
+              THEN 'ключи совпали, объём различается (' || c.volume || ' vs ' || km.pvol || ')'
+            WHEN km.id IS NOT NULL AND coalesce(c.volume,'') <> '' AND c.volume = km.pvol
+              THEN 'brand_key+name_key+volume'
+            WHEN km.id IS NOT NULL THEN 'brand_key+name_key'
+            ELSE 'нет точного кандидата (fuzzy не запускался)' END,
           jsonb_build_object(
-            'ean_match_id', j.em_id, 'key_match_id', j.km_id,
-            'fuzzy_match_id', j.fz_id, 'fuzzy_sim', j.fz_sim,
-            'c2b_volume', j.volume, 'product_volume', j.product_volume
+            'ean_match_id', em.id, 'key_match_id', km.id,
+            'c2b_volume', c.volume, 'product_volume', coalesce(em.pvol, km.pvol)
           )
-        FROM (
-          SELECT
-            c.source_ref AS c2b_ref, c.ean, c.brand_key, c.name_key, c.volume,
-            em.id AS em_id, km.id AS km_id, fz.id AS fz_id, fz.sim AS fz_sim,
-            CASE
-              WHEN em.id IS NOT NULL THEN 'MATCH_BY_EAN'
-              WHEN km.id IS NOT NULL THEN 'MATCH_BY_KEYS'
-              WHEN fz.id IS NOT NULL AND fz.sim >= ${FUZZY} THEN 'FUZZY'
-              ELSE 'NO_MATCH'
-            END AS match_type,
-            CASE WHEN em.id IS NOT NULL THEN em.id WHEN km.id IS NOT NULL THEN km.id
-                 WHEN fz.id IS NOT NULL AND fz.sim >= ${FUZZY} THEN fz.id END AS product_id,
-            CASE WHEN em.id IS NOT NULL THEN em.barcode WHEN km.id IS NOT NULL THEN km.barcode
-                 WHEN fz.id IS NOT NULL AND fz.sim >= ${FUZZY} THEN fz.barcode END AS product_barcode,
-            CASE WHEN em.id IS NOT NULL THEN em.brand WHEN km.id IS NOT NULL THEN km.brand
-                 WHEN fz.id IS NOT NULL AND fz.sim >= ${FUZZY} THEN fz.brand END AS product_brand,
-            CASE WHEN em.id IS NOT NULL THEN em.name WHEN km.id IS NOT NULL THEN km.name
-                 WHEN fz.id IS NOT NULL AND fz.sim >= ${FUZZY} THEN fz.name END AS product_name,
-            CASE WHEN em.id IS NOT NULL THEN em.pvol WHEN km.id IS NOT NULL THEN km.pvol
-                 WHEN fz.id IS NOT NULL AND fz.sim >= ${FUZZY} THEN fz.pvol END AS product_volume,
-            CASE
-              WHEN em.id IS NOT NULL THEN 1.00
-              WHEN km.id IS NOT NULL THEN
-                CASE WHEN coalesce(c.volume,'') <> '' AND coalesce(km.pvol,'') <> '' THEN
-                       CASE WHEN c.volume = km.pvol THEN 0.97 ELSE 0.70 END
-                     ELSE 0.90 END
-              WHEN fz.id IS NOT NULL AND fz.sim >= ${FUZZY} THEN round((0.50 + 0.40 * fz.sim)::numeric, 2)
-              ELSE 0.0
-            END AS confidence,
-            CASE
-              WHEN em.id IS NOT NULL AND km.id IS NOT NULL AND km.id <> em.id THEN true
-              WHEN em.id IS NULL AND km.id IS NOT NULL
-                   AND coalesce(c.volume,'') <> '' AND coalesce(km.pvol,'') <> ''
-                   AND c.volume <> km.pvol THEN true
-              ELSE false
-            END AS conflict,
-            CASE
-              WHEN em.id IS NOT NULL AND km.id IS NOT NULL AND km.id <> em.id
-                THEN 'EAN→' || em.id || ' но ключи→' || km.id
-              WHEN em.id IS NOT NULL THEN 'exact ean = barcode'
-              WHEN km.id IS NOT NULL AND coalesce(c.volume,'') <> '' AND coalesce(km.pvol,'') <> '' AND c.volume <> km.pvol
-                THEN 'ключи совпали, объём различается (' || c.volume || ' vs ' || km.pvol || ')'
-              WHEN km.id IS NOT NULL AND coalesce(c.volume,'') <> '' AND c.volume = km.pvol
-                THEN 'brand_key+name_key+volume'
-              WHEN km.id IS NOT NULL THEN 'brand_key+name_key'
-              WHEN fz.id IS NOT NULL AND fz.sim >= ${FUZZY}
-                THEN 'fuzzy name_key sim=' || round(fz.sim::numeric, 2)
-              ELSE 'нет кандидата в каталоге'
-            END AS reason
-          FROM scrape.caretobeauty_products_normalized c
+        FROM scrape.caretobeauty_products_normalized c
+        LEFT JOIN LATERAL (
+          SELECT p.id, p.barcode, p.brand, p.name, dm.extract_volume(p.name) AS pvol
+          FROM "Product" p
+          WHERE c.has_valid_ean AND c.ean IS NOT NULL AND p.barcode = c.ean
+          LIMIT 1
+        ) em ON true
+        LEFT JOIN LATERAL (
+          SELECT pk.product_id AS id, pk.barcode, pk.product_brand AS brand,
+                 pk.product_name AS name, pk.volume AS pvol
+          FROM _c2b_pkeys pk
+          WHERE coalesce(c.brand_key,'') <> ''
+            AND pk.brand_key = c.brand_key AND pk.name_key = c.name_key
+          LIMIT 1
+        ) km ON true
+      `);
+      ts(`[exact] classify (EAN+KEYS) · ${Date.now() - t}ms`);
+    },
+    { timeout: args.statementTimeoutMs + 30_000, maxWait: 5_000 },
+  );
+}
+
+/* ───────── opt-in: fuzzy upgrade на остатке NO_MATCH ───────── */
+
+async function runFuzzyOnly(prisma: PrismaClient, args: CliArgs): Promise<void> {
+  const FUZZY = Prisma.raw(String(args.fuzzyThreshold));
+  const pre = await prisma.$queryRaw<{ c: bigint }[]>(
+    Prisma.sql`SELECT count(*) AS c FROM scrape.caretobeauty_merge_candidates WHERE match_type = 'NO_MATCH'`,
+  );
+  const noMatch = n(pre[0]?.c);
+  if (noMatch === 0) {
+    ts("[fuzzy] нет NO_MATCH строк (сначала прогоните быстрый режим). Пропуск.");
+    return;
+  }
+  ts(`[fuzzy] NO_MATCH к обработке: ${noMatch} (limit ${args.fuzzyLimit}, threshold ${args.fuzzyThreshold})`);
+
+  await prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = '${args.statementTimeoutMs}'`);
+      let t = Date.now();
+      const pool = await buildProductKeys(tx);
+      ts(`[fuzzy] product-keys pool=${pool} rows · ${Date.now() - t}ms`);
+
+      t = Date.now();
+      const updated = await tx.$executeRaw(Prisma.sql`
+        WITH cand AS (
+          SELECT m.id AS mid, c.brand_key, c.name_key, c.volume AS c_volume
+          FROM scrape.caretobeauty_merge_candidates m
+          JOIN scrape.caretobeauty_products_normalized c ON c.source_ref = m.c2b_ref
+          WHERE m.match_type = 'NO_MATCH' AND coalesce(c.brand_key,'') <> ''
+          ORDER BY m.id
+          LIMIT ${args.fuzzyLimit}
+        ),
+        best AS (
+          SELECT cand.mid, cand.c_volume,
+                 fz.id, fz.barcode, fz.product_brand, fz.product_name, fz.pvol, fz.sim
+          FROM cand
           LEFT JOIN LATERAL (
-            SELECT p.id, p.barcode, p.brand, p.name, dm.extract_volume(p.name) AS pvol
-            FROM "Product" p
-            WHERE c.has_valid_ean AND c.ean IS NOT NULL AND p.barcode = c.ean
-            LIMIT 1
-          ) em ON true
-          LEFT JOIN LATERAL (
-            SELECT cand.id, cand.barcode, cand.brand, cand.name, cand.pvol
-            FROM _c2b_cand cand
-            WHERE coalesce(c.brand_key,'') <> '' AND cand.bkey = c.brand_key AND cand.nkey = c.name_key
-            LIMIT 1
-          ) km ON true
-          LEFT JOIN LATERAL (
-            SELECT cand.id, cand.barcode, cand.brand, cand.name, cand.pvol,
-                   similarity(cand.nkey, coalesce(c.name_key,'')) AS sim
-            FROM _c2b_cand cand
-            WHERE coalesce(c.brand_key,'') <> '' AND cand.bkey = c.brand_key
-            ORDER BY similarity(cand.nkey, coalesce(c.name_key,'')) DESC NULLS LAST
+            SELECT pk.product_id AS id, pk.barcode, pk.product_brand, pk.product_name,
+                   pk.volume AS pvol,
+                   similarity(pk.name_key, coalesce(cand.name_key,'')) AS sim
+            FROM _c2b_pkeys pk
+            WHERE pk.brand_key = cand.brand_key
+            ORDER BY similarity(pk.name_key, coalesce(cand.name_key,'')) DESC NULLS LAST
             LIMIT 1
           ) fz ON true
-        ) j
+        )
+        UPDATE scrape.caretobeauty_merge_candidates m SET
+          match_type      = 'FUZZY',
+          product_id      = best.id,
+          product_barcode = best.barcode,
+          product_brand   = best.product_brand,
+          product_name    = best.product_name,
+          product_volume  = best.pvol,
+          confidence      = round((0.50 + 0.40 * best.sim)::numeric, 2),
+          reason          = 'fuzzy name_key sim=' || round(best.sim::numeric, 2),
+          comments        = jsonb_build_object(
+                              'fuzzy_match_id', best.id, 'fuzzy_sim', best.sim,
+                              'c2b_volume', best.c_volume, 'product_volume', best.pvol)
+        FROM best
+        WHERE m.id = best.mid AND best.id IS NOT NULL AND best.sim >= ${FUZZY}
       `);
+      ts(`[fuzzy] upgraded NO_MATCH → FUZZY: ${updated} · ${Date.now() - t}ms`);
     },
-    { timeout: 120_000, maxWait: 5_000 },
+    { timeout: args.statementTimeoutMs + 30_000, maxWait: 5_000 },
   );
-  ts(`[merge caretobeauty] classified in ${Date.now() - t0}ms`);
+}
+
+/* ───────── main ───────── */
+
+async function main(): Promise<void> {
+  const args = parseCli();
+  if (args.apply) {
+    ts("[merge caretobeauty] --apply ЗАПРЕЩЁН. В Product ничего не пишется. Работаю как dry-run.");
+  }
+  ts(`[merge caretobeauty] DRY-RUN · mode=${args.fuzzyOnly ? "fuzzy-only" : "fast(exact)"} · stmt_timeout=${args.statementTimeoutMs}ms`);
+
+  await ensureSchema(ts);
+  const prisma = getPrisma();
+
+  const t0 = Date.now();
+  if (args.fuzzyOnly) {
+    await runFuzzyOnly(prisma, args);
+  } else {
+    await runExact(prisma, args);
+    if (args.noFuzzy) ts("[merge caretobeauty] --no-fuzzy: fuzzy-этап пропущен (быстрый режим).");
+    else ts("[merge caretobeauty] fuzzy по умолчанию ВЫКЛЮЧЕН. Для апгрейда: -- --fuzzy-only");
+  }
+  ts(`[merge caretobeauty] stage done · ${Date.now() - t0}ms`);
 
   await report(prisma, args);
 }
 
 /* ───────── отчёт ───────── */
 
-async function report(
-  prisma: ReturnType<typeof getPrisma>,
-  args: CliArgs,
-): Promise<void> {
+async function report(prisma: PrismaClient, args: CliArgs): Promise<void> {
   const counts = await prisma.$queryRaw<
     { match_type: string; c: bigint; conflicts: bigint }[]
   >(Prisma.sql`
-    SELECT match_type, count(*) AS c,
-           count(*) FILTER (WHERE conflict) AS conflicts
-    FROM scrape.caretobeauty_merge_candidates
-    GROUP BY match_type
+    SELECT match_type, count(*) AS c, count(*) FILTER (WHERE conflict) AS conflicts
+    FROM scrape.caretobeauty_merge_candidates GROUP BY match_type
   `);
   const by = new Map(counts.map((r) => [r.match_type, n(r.c)]));
   const total = [...by.values()].reduce((a, b) => a + b, 0);
@@ -236,21 +302,16 @@ async function report(
            product_name AS pn, ean
     FROM scrape.caretobeauty_merge_candidates m
     WHERE match_type <> 'NO_MATCH' AND NOT conflict
-    ORDER BY confidence DESC, match_type
-    LIMIT ${args.examples}
+    ORDER BY confidence DESC, match_type LIMIT ${args.examples}
   `);
-
   const topNew = await prisma.$queryRaw<
     { brand_key: string | null; cn: string | null; ean: string | null }[]
   >(Prisma.sql`
     SELECT m.brand_key, m.ean,
            (SELECT product_name_normalized FROM scrape.caretobeauty_products_normalized z WHERE z.source_ref = m.c2b_ref) AS cn
     FROM scrape.caretobeauty_merge_candidates m
-    WHERE match_type = 'NO_MATCH'
-    ORDER BY m.brand_key NULLS LAST
-    LIMIT ${args.examples}
+    WHERE match_type = 'NO_MATCH' ORDER BY m.brand_key NULLS LAST LIMIT ${args.examples}
   `);
-
   const topConflicts = await prisma.$queryRaw<
     {
       cn: string | null; ean: string | null; volume: string | null;
@@ -262,9 +323,7 @@ async function report(
       (SELECT product_name_normalized FROM scrape.caretobeauty_products_normalized z WHERE z.source_ref = m.c2b_ref) AS cn,
       m.ean, m.volume, m.product_id, m.product_name, m.product_barcode, m.product_volume, m.reason
     FROM scrape.caretobeauty_merge_candidates m
-    WHERE conflict
-    ORDER BY confidence DESC
-    LIMIT ${args.examples}
+    WHERE conflict ORDER BY confidence DESC LIMIT ${args.examples}
   `);
 
   log("");
@@ -273,7 +332,7 @@ async function report(
   log("");
   log(`MATCH_BY_EAN:    ${ean}`);
   log(`MATCH_BY_KEYS:   ${keys}`);
-  log(`FUZZY:           ${fuzzy}`);
+  log(`FUZZY:           ${fuzzy}${fuzzy === 0 ? "  (fuzzy не запускался — см. --fuzzy-only)" : ""}`);
   log(`Новые товары:    ${fresh}`);
   log(`Конфликты:       ${conflicts}  (overlay-флаг поверх совпавших)`);
   log("-------------------------------------------------------");
