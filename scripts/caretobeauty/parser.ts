@@ -188,48 +188,69 @@ const DISCLAIMER_RE =
 const DISCLAIMER_RE2 =
   /the ingredients list might be changed[\s\S]*?packaging[\s\S]*?using\.?/gi;
 
-const INCI_MARKER =
-  /\b(aqua|water|eau|glycerin|glycerine|parfum|fragrance|alcohol|sodium|cetearyl|cetyl|dimethicone|butylene|propylene|glycol|tocopher|citric acid|niacinamide|phenoxyethanol|caprylic|stearyl|panthenol|xanthan|squalane|paraffinum|butyrospermum|ci \d|carbomer)\b/i;
+/* ── строгий валидатор INCI ── */
 
-/** Очистка кандидата INCI: убрать дисклеймер, проверить, что это реально INCI. */
-function cleanInciCandidate(s: string): string | null {
-  let t = s.replace(DISCLAIMER_RE, " ").replace(DISCLAIMER_RE2, " ");
-  t = t.replace(/\s+/g, " ").trim().replace(/^[\s.,;:*•\-]+/, "").replace(/\s*\.\s*$/, "").trim();
-  if (t.length < 12) return null;
-  const commas = (t.match(/,/g) ?? []).length;
-  const looksInci = INCI_MARKER.test(t) || /^(aqua|water|eau)\b/i.test(t);
-  // INCI = список с запятыми + типичные токены. Иначе это маркетинг/дисклеймер.
-  return commas >= 2 && looksInci ? t : null;
-}
+// Маркетинг/инструкция по применению — этих слов в настоящем INCI не бывает.
+const APP_WORDS =
+  /\b(appl(y|ied|ies)|rinse[sd]?|using|uses?|used|helps?|support(s|ed)?|purif(y|ies|ied)|neutrali[sz]e[sd]?|tone[sd]?|energi[sz](ing|e[sd]?)|moisturi[sz]e[sd]?|hydrate[sd]?|soothe[sd]?|calm(s|ed)?|protect(s|ed)?|improve[sd]?|reduce[sd]?|leaves?|provide[sd]?|designed|formulated|suitable|skin|pores?|redness|acne|morning|evening|wet|lather|managing|manage[sd]?|treatment|regeneration)\b/i;
+const PROSE_MARKERS = /(this product|helps to|apply every|such as|while)/i;
+// Типичные INCI-маркеры (должен присутствовать хотя бы один).
+const INCI_MARKERS =
+  /\b(aqua|water|eau|glycerin|glycerine|alcohol|dimethicone|caprylic|sodium|potassium|glycol|extract|seed oil|butter|[a-z]+ic acid|chloride|benzoate|phenoxyethanol|tocopher(ol|yl)|parfum|fragrance|cetearyl|cetyl|niacinamide|squalane|paraffinum|butyrospermum|carbomer|hyaluron|panthenol|xanthan|ci ?\d{4,5})\b/i;
 
 /**
- * INCI = ТОЛЬКО реальная секция «Ingredients» / «Full Ingredients List»
- * (НЕ «Main Ingredients», НЕ навигация). Берём после заголовка, режем
- * дисклеймер, валидируем как INCI. Нет такой секции / не INCI → NULL.
+ * Строгая проверка: это РЕАЛЬНЫЙ INCI-список, а не маркетинг/инструкция.
+ * Отклоняем прозу (глаголы применения, ≥2 точек, точки с запятой, «this
+ * product» и т.п.). Принимаем только список через запятую с INCI-маркерами.
+ */
+export function isLikelyInci(input: string | null): boolean {
+  if (!input) return false;
+  const t = input.replace(/\s+/g, " ").trim();
+  if (t.length < 12) return false;
+  // ── reject: проза ──
+  if ((t.match(/\./g) ?? []).length > 1) return false;       // >1 точки = предложения
+  if (t.includes(";")) return false;                          // ; = маркетинговые фразы
+  if (PROSE_MARKERS.test(t)) return false;
+  if (APP_WORDS.test(t)) return false;                        // apply/helps/skin/…
+  // ── accept: список + INCI-маркеры ──
+  const commas = (t.match(/,/g) ?? []).length;
+  if (commas < 3) return false;                               // нужен список токенов
+  if (!INCI_MARKERS.test(t)) return false;
+  return true;
+}
+
+// Заголовок РЕАЛЬНОЙ INCI-секции (на отдельной строке). Только точные
+// названия; «Main/Key/Active Ingredients», «How to use», навигация — НЕ сюда.
+const INCI_HEADING_RE =
+  /(?:^|\n)[ \t#*>•-]*(Full Ingredients List|Ingredients list|Ingredients|Composition|INCI)\b[ \t:.\-*>]*\n?/gi;
+// Любой следующий заголовок секции — граница INCI-блока.
+const NEXT_HEADING_RE =
+  /(?:^|\n)[ \t#*>•-]*(Characteristics|Main Ingredients|Key Ingredients|Active Ingredients|How to use|How to Use|Directions|Safety Warning|Safety Information|Manufacturer Information|Additional Information|Videos|Articles about|Reviews|Why shop|Subscribe our|Download Care to Beauty|Product Description|Full Ingredients List|Ingredients list|Composition|INCI|Ingredients)\b/i;
+
+/**
+ * INCI = ТОЛЬКО из секции, точно озаглавленной Ingredients / Full Ingredients
+ * List / Ingredients list / Composition / INCI. «Main/Key/Active Ingredients»
+ * и инструкции игнорируются. Режем дисклеймер, валидируем isLikelyInci.
+ * Не нашли настоящий INCI → NULL.
  */
 function extractIngredients(text: string): string | null {
-  const lower = text.toLowerCase();
-  // ищем строго ПОСЛЕ начала описания, чтобы не цеплять верхнюю навигацию
-  const from = Math.max(0, lower.indexOf("product description"));
-  const re = /\bingredients\b/gi;
-  re.lastIndex = from;
+  // искать строго после начала описания → не цеплять верхнюю навигацию
+  const from = Math.max(0, text.toLowerCase().indexOf("product description"));
+  INCI_HEADING_RE.lastIndex = from;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    const idx = m.index;
-    const pre = lower.slice(Math.max(0, idx - 6), idx);
-    if (/(main|top)\s*$/.test(pre)) continue; // «Main/Top Ingredients» — не INCI
-    let end = text.length;
-    for (const stop of [
-      "Safety Warning", "Safety Information", "Manufacturer Information",
-      "Additional Information", "How to use", "Directions", "Videos",
-      "Reviews", "Why shop", "Subscribe our", "Download Care to Beauty",
-      "Characteristics", "Main Ingredients",
-    ]) {
-      const i = indexOfCI(lower, stop, idx + m[0].length);
-      if (i >= 0 && i < end) end = i;
-    }
-    const inci = cleanInciCandidate(text.slice(idx + m[0].length, end));
-    if (inci) return inci;
+  while ((m = INCI_HEADING_RE.exec(text)) !== null) {
+    const start = m.index + m[0].length;
+    const rest = text.slice(start);
+    const next = NEXT_HEADING_RE.exec(rest);
+    let body = next ? rest.slice(0, next.index) : rest.slice(0, 4000);
+    body = body.replace(DISCLAIMER_RE, " ").replace(DISCLAIMER_RE2, " ");
+    const cand = body
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/^[\s.,;:*•\-]+/, "")
+      .replace(/\s*\.\s*$/, "")
+      .trim();
+    if (isLikelyInci(cand)) return cand;
   }
   return null;
 }

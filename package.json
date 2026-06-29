@@ -24,6 +24,7 @@
     "normalize:inn-skin": "tsx scripts/normalize-inn-skin.ts",
     "merge:inn-skin": "tsx scripts/merge-inn-skin.ts",
     "check:inn-skin-parser": "tsx scripts/check-inn-skin-parser.ts",
+    "check:caretobeauty-parser": "tsx scripts/check-caretobeauty-parser.ts",
     "scrape:barcode-list": "tsx scripts/scrape-barcode-list.ts",
     "scrape:caretobeauty": "tsx scripts/scrape-caretobeauty.ts",
     "normalize:caretobeauty": "tsx scripts/normalize-caretobeauty.ts",
