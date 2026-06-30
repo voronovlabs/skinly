@@ -38,6 +38,8 @@ interface CliArgs {
   limit: number;
   enableHtml: boolean;
   delayMs: number;
+  /** >0 → также добирать «коротко-некачественный» INCI (length(trim) < N). */
+  minLength: number;
 }
 function parseCli(): CliArgs {
   const { values } = parseArgs({
@@ -48,18 +50,21 @@ function parseCli(): CliArgs {
       limit: { type: "string", default: "0" },
       "enable-html": { type: "boolean", default: false },
       "delay-ms": { type: "string", default: "350" },
+      "min-length": { type: "string", default: "0" },
     },
   });
   const brandVals = (values.brand as string[] | undefined) ?? [];
   const brands = brandVals.flatMap((b) => b.split("||")).map((b) => b.trim()).filter(Boolean);
   const limit = parseInt(String(values.limit), 10);
   const delay = parseInt(String(values["delay-ms"]), 10);
+  const minLen = parseInt(String(values["min-length"]), 10);
   return {
     apply: Boolean(values.apply),
     brands: brands.length ? brands : null,
     limit: Number.isFinite(limit) && limit > 0 ? limit : 0,
     enableHtml: Boolean(values["enable-html"]),
     delayMs: Number.isFinite(delay) && delay >= 0 ? delay : 350,
+    minLength: Number.isFinite(minLen) && minLen > 0 ? minLen : 0,
   };
 }
 
@@ -81,9 +86,37 @@ async function main(): Promise<void> {
   log(`providers: ${providers.map((p) => p.name).join(" → ")}`);
 
   const brands = args.brands ?? TARGET_BRANDS;
+  // Матчим СЫРОЙ бренд (c.brand из CtB og:brand, напр. 'CeraVe') БЕЗ
+  // dm.norm_brand (тот делает initcap → 'Cerave' и ломал сравнение).
+  // Case-insensitive + fallback на нормализованный бренд.
+  const brandsLower = brands.map((b) => b.trim().toLowerCase());
   const limitClause = args.limit ? Prisma.sql`LIMIT ${args.limit}` : Prisma.empty;
 
-  // товары без состава, с EAN, нужных брендов (бренд берём нормализованный)
+  // Условие «нет нормального состава»: NULL | пусто (+ опц. слишком короткий).
+  const lowQ = args.minLength
+    ? Prisma.sql` OR length(trim(c.ingredients_raw)) < ${args.minLength}`
+    : Prisma.empty;
+  const brandFilter = Prisma.sql`
+    ( lower(trim(c.brand)) = ANY(${brandsLower})
+      OR lower(trim(coalesce(nrm.brand_normalized,''))) = ANY(${brandsLower}) )`;
+
+  // ── debug-счётчики ──
+  const dbg = await prisma.$queryRaw<
+    { total_for_brand: bigint; missing_inci: bigint; selected: bigint }[]
+  >(Prisma.sql`
+    SELECT
+      count(*)                                                              AS total_for_brand,
+      count(*) FILTER (WHERE c.ingredients_raw IS NULL OR trim(c.ingredients_raw) = '') AS missing_inci,
+      count(*) FILTER (WHERE c.ingredients_raw IS NULL OR trim(c.ingredients_raw) = ''${lowQ}) AS selected
+    FROM scrape.caretobeauty_products c
+    LEFT JOIN scrape.caretobeauty_products_normalized nrm ON nrm.source_ref = c.ean
+    WHERE coalesce(c.ean,'') <> '' AND ${brandFilter}
+  `);
+  const d = dbg[0];
+  log(`[debug] total rows for brand(s): ${n(d?.total_for_brand)}`);
+  log(`[debug] missing INCI (NULL|empty): ${n(d?.missing_inci)}`);
+  log(`[debug] selected candidates${args.minLength ? ` (incl. <${args.minLength})` : ""}: ${n(d?.selected)}`);
+
   const rows = await prisma.$queryRaw<Row[]>(Prisma.sql`
     SELECT c.ean,
            coalesce(nullif(nrm.brand_normalized,''), c.brand)        AS brand,
@@ -92,13 +125,13 @@ async function main(): Promise<void> {
            c.ingredients_raw
     FROM scrape.caretobeauty_products c
     LEFT JOIN scrape.caretobeauty_products_normalized nrm ON nrm.source_ref = c.ean
-    WHERE coalesce(c.ingredients_raw,'') = ''
-      AND coalesce(c.ean,'') <> ''
-      AND coalesce(nullif(nrm.brand_normalized,''), c.brand) = ANY(${brands})
+    WHERE coalesce(c.ean,'') <> ''
+      AND ${brandFilter}
+      AND ( c.ingredients_raw IS NULL OR trim(c.ingredients_raw) = ''${lowQ} )
     ORDER BY c.ean
     ${limitClause}
   `);
-  log(`[enrich c2b INCI] кандидатов без INCI: ${rows.length}`);
+  log(`[enrich c2b INCI] кандидатов к обработке: ${rows.length}`);
 
   const bySource = new Map<string, number>();
   let resolved = 0;
