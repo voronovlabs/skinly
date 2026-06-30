@@ -246,3 +246,21 @@ CREATE TABLE IF NOT EXISTS scrape.caretobeauty_merge_candidates (
 CREATE INDEX IF NOT EXISTS idx_c2bmc_type     ON scrape.caretobeauty_merge_candidates (match_type);
 CREATE INDEX IF NOT EXISTS idx_c2bmc_conflict ON scrape.caretobeauty_merge_candidates (conflict);
 CREATE INDEX IF NOT EXISTS idx_c2bmc_product  ON scrape.caretobeauty_merge_candidates (product_id);
+
+-- ── INGREDIENT ENRICHMENT · многоисточниковый INCI (provenance) ──────────────
+-- Результат провайдер-цепочки getIngredients(): откуда взят настоящий INCI для
+-- товара Care to Beauty, когда на самой карточке состава нет. Только staging:
+-- сюда пишем провенанс, а в scrape.caretobeauty_products.ingredients_raw
+-- заполняем INCI лишь там, где он был пуст. В Product ничего не пишется.
+CREATE TABLE IF NOT EXISTS scrape.caretobeauty_ingredient_enrichment (
+  ean             text        PRIMARY KEY,   -- товар Care to Beauty (EAN)
+  source          text        NOT NULL,      -- 'caretobeauty'|'openbeautyfacts'|<site>
+  source_url      text,
+  method          text,                       -- 'staging'|'ean'|'brand-html'|'retailer-html'
+  confidence      numeric,
+  ingredients_raw text        NOT NULL,       -- ТОЛЬКО валидный INCI (isLikelyInci)
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_c2bie_source ON scrape.caretobeauty_ingredient_enrichment (source);
