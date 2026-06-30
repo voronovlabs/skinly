@@ -12,6 +12,7 @@
  */
 
 import { isLikelyInci, parseProduct } from "./caretobeauty/parser";
+import { cleanObfIngredients } from "./enrich/ingredients/providers/openbeautyfacts";
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ""): void {
@@ -67,6 +68,54 @@ const okReal =
   !/main ingredients|apply|helps/i.test(real.ingredientsRaw);
 check("REAL_HTML → ingredientsRaw = реальный INCI", okReal,
   `got="${(real.ingredientsRaw ?? "null").slice(0, 70)}…"`);
+
+// 4. РЕАЛЬНАЯ страница CeraVe (cerave-intensive-moisturizing-cream-340g):
+// AI-описание с маркетинговыми буллетами, БЕЗ секции INCI. Должно быть NULL
+// (не выдёргивать «active ingredients»/«ceramides»/«hyaluronic acid» как INCI).
+const CERAVE_HTML = `<h2>Product Description</h2>
+<p><strong>CeraVe Intensive Moisturizing Cream 340g</strong> is designed to restore the feel of soft, hydrated skin while providing soothing comfort from head to toe.</p>
+<p>Key features include:</p>
+<ul>
+<li>Rich and comforting consistency for intensive moisturization;</li>
+<li>Formulated with three essential ceramides to support the skin barrier;</li>
+<li>Contains hyaluronic acid for moisture retention;</li>
+<li>Includes 5% hydro-urea to enhance hydrating properties;</li>
+<li>MVE Delivery Technology gradually releases active ingredients for lasting hydration up to 72 hours;</li>
+<li>Non-sticky formula allows for easy application across the body;</li>
+<li>Fast-absorbing to keep dryness at bay.</li>
+</ul>
+<p><strong>## Manufacturer Information</strong></p>
+<p>CeraVe 62, Quai Charles Pasqua France</p>`;
+const cerave = parseProduct(CERAVE_HTML, "https://x/cerave");
+check("CeraVe (нет INCI на странице) → ingredientsRaw is null",
+  cerave.ingredientsRaw === null,
+  `got=${JSON.stringify(cerave.ingredientsRaw)?.slice(0, 60)}`);
+check("CeraVe → description есть и обрезано до Manufacturer Information",
+  cerave.description != null && /Key features/i.test(cerave.description) &&
+  !/Manufacturer Information|consumidor/i.test(cerave.description),
+  `len=${cerave.description?.length ?? 0}`);
+
+// 5. OpenBeautyFacts dirty ingredients_text (EAN 3337875597296):
+// manufacturer/address prefix before the real INCI must be cleaned away.
+const OBF_DIRTY =
+  "Producător: CeraVe LLC, New York, NY 10022, USA. Ingredients: Aqua/Water, " +
+  "Glycerin, Caprylic/Capric Triglyceride, Cetearyl Alcohol, Ceramide NP, " +
+  "Ceramide AP, Ceramide EOP, Carbomer, Dimethicone, Behentrimonium Methosulfate, " +
+  "Sodium Lauroyl Lactylate, Cholesterol, Phenoxyethanol, Disodium EDTA, " +
+  "Tocopherol, Phytosphingosine, Xanthan Gum, Ethylhexylglycerin.";
+const cleaned = cleanObfIngredients(OBF_DIRTY);
+check("OBF dirty (3337875597296) → cleaned, no manufacturer junk",
+  cleaned != null &&
+    !/produc|new york|\bllc\b|usa\b/i.test(cleaned) &&
+    /^Aqua\/Water/i.test(cleaned) &&
+    isLikelyInci(cleaned),
+  `got="${(cleaned ?? "null").slice(0, 60)}…"`);
+
+// no 'ingredients:' marker + manufacturer markers present → reject (null)
+const OBF_NOLIST = "Producător: CeraVe LLC, New York. Aqua, Glycerin, Tocopherol.";
+check("OBF manufacturer-only (no 'ingredients:') → null",
+  cleanObfIngredients(OBF_NOLIST) === null,
+  `got=${JSON.stringify(cleanObfIngredients(OBF_NOLIST))?.slice(0, 50)}`);
 
 console.log("");
 if (failures > 0) {
