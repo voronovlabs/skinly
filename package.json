@@ -31,6 +31,9 @@
     "merge:caretobeauty": "tsx scripts/merge-caretobeauty.ts",
     "enrich:caretobeauty-ingredients": "tsx scripts/enrich-caretobeauty-ingredients.ts",
     "import:caretobeauty-products": "tsx scripts/import-caretobeauty-products.ts",
+    "import:caretobeauty-ingredients": "tsx scripts/import-caretobeauty-ingredients.ts",
+    "import:aderma-ingredients": "tsx scripts/import-aderma-ingredients.ts",
+    "import:manual-ingredients": "tsx scripts/import-manual-ingredients.ts",
     "match:inn-skin-barcodes": "tsx scripts/match-inn-skin-barcodes.ts"
   },
   "dependencies": {
@@ -50,6 +53,7 @@
     "@types/node": "^22.10.5",
     "@types/react": "^19.0.7",
     "@types/react-dom": "^19.0.3",
+    "cheerio": "^1.0.0",
     "eslint": "^9.18.0",
     "eslint-config-next": "^15.1.6",
     "postcss": "^8.5.1",
@@ -57,7 +61,7 @@
     "tailwindcss": "^4.0.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
-    "cheerio": "^1.0.0"
+    "xlsx": "^0.18.5"
   },
   "engines": {
     "node": ">=20.0.0"
