@@ -35,7 +35,9 @@
     "import:caretobeauty-ingredients": "tsx scripts/import-caretobeauty-ingredients.ts",
     "import:aderma-ingredients": "tsx scripts/import-aderma-ingredients.ts",
     "import:manual-ingredients": "tsx scripts/import-manual-ingredients.ts",
-    "match:inn-skin-barcodes": "tsx scripts/match-inn-skin-barcodes.ts"
+    "match:inn-skin-barcodes": "tsx scripts/match-inn-skin-barcodes.ts",
+    "audit:ingredient-duplicates": "tsx scripts/audit-ingredient-duplicates.ts",
+    "merge:ingredient-duplicates": "tsx scripts/merge-ingredient-duplicates.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.2.1",
