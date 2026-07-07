@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import type { SkinProfileSummaryLike } from "@/lib/compatibility";
 import { getSessionFromAuthorizationHeader } from "@/lib/auth/bearer";
 import { getRecommendations } from "@/lib/recommendations/service";
+import { createRecoTimer } from "@/lib/recommendations/timing";
 import type { Subject } from "@/lib/recommendations/types";
 import { apiJson, apiPreflight, serverError } from "@/lib/api/respond";
 
@@ -35,6 +36,8 @@ function csv(v: string | null): string[] {
 }
 
 export async function GET(req: NextRequest) {
+  // Timing включается только через env RECO_TIMING=1 (noop иначе).
+  const timer = createRecoTimer();
   const sp = req.nextUrl.searchParams;
 
   const barcode = sp.get("barcode")?.trim() || null;
@@ -60,16 +63,25 @@ export async function GET(req: NextRequest) {
     : null;
 
   // Subject для персонализации: Bearer userId → иначе X-Anon-Id → иначе нет.
-  const session = await getSessionFromAuthorizationHeader(req);
+  const session = await timer.time("auth", () =>
+    getSessionFromAuthorizationHeader(req),
+  );
   const userId = session?.type === "user" ? session.userId : null;
   const anonymousId = userId ? null : req.headers.get("x-anon-id")?.trim() || null;
   const subject: Subject | null =
     userId || anonymousId ? { userId, anonymousId } : null;
 
   try {
-    const items = await getRecommendations({ barcode, limit, profile, subject });
+    const items = await getRecommendations(
+      { barcode, limit, profile, subject },
+      timer,
+    );
     // Персонализировано → не кэшируем на edge.
-    return apiJson({ items }, { cache: "no-store" });
+    const res = timer.timeSync("serialization", () =>
+      apiJson({ items }, { cache: "no-store" }),
+    );
+    timer.flush(); // одна строка: total + все этапы (meta пишет service)
+    return res;
   } catch (e) {
     console.error("[api/v1/recommendations] failed:", e);
     return serverError("Failed to build recommendations");
