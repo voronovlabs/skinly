@@ -37,6 +37,7 @@
     "import:manual-ingredients": "tsx scripts/import-manual-ingredients.ts",
     "match:inn-skin-barcodes": "tsx scripts/match-inn-skin-barcodes.ts",
     "audit:ingredient-duplicates": "tsx scripts/audit-ingredient-duplicates.ts",
+    "audit:product-images:size": "tsx scripts/audit-product-image-sizes.ts",
     "merge:ingredient-duplicates": "tsx scripts/merge-ingredient-duplicates.ts"
   },
   "dependencies": {
