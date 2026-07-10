@@ -27,9 +27,9 @@
 #   docker compose --profile tools run --rm tools npx prisma db seed
 #   docker compose --profile tools run --rm tools npm run scrape:national-catalog -- --limit 20
 
-FROM node:20-alpine
+FROM node:20-bookworm-slim
 
-RUN apk add --no-cache libc6-compat openssl
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -37,6 +37,7 @@ WORKDIR /app
 # postinstall = `prisma generate`, поэтому prisma/ должен быть на месте до npm ci.
 COPY package.json package-lock.json* ./
 COPY prisma ./prisma
+RUN npx playwright install-deps chromium
 RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 # Дефолтная команда — подсказка. Реальные команды передаются через

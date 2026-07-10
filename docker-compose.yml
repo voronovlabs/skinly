@@ -69,6 +69,8 @@ services:
       FEATURE_AI_EXPLANATION: ${FEATURE_AI_EXPLANATION:-false}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       FEATURE_OPENBEAUTYFACTS: ${FEATURE_OPENBEAUTYFACTS:-false}
+      USE_DM_COMPATIBILITY: ${USE_DM_COMPATIBILITY:-true}
+      SEARCH_TIMING: ${SEARCH_TIMING:-false}
     ports:
       - "3000:3000"
     networks:
@@ -96,7 +98,9 @@ services:
       # или prisma/ видна сразу, без rebuild'а. Read-only защищает от
       # случайной модификации репо изнутри контейнера.
       - ./scripts:/app/scripts:ro
+      - ./src:/app/src:ro
       - ./prisma:/app/prisma:ro
+      - ./sql:/app/sql:ro
       # Куда скрейпер пишет JSONL и checkpoint. Должна быть writable.
       - ./data:/app/data
       # Отчёты аудита/миграции. Writable — скрипты пишут reports/*.json|csv.
@@ -105,11 +109,13 @@ services:
       # Bind mount с ХОСТА — картинки НЕ попадают в Docker image и НЕ теряются
       # при rebuild. Caddy на хосте раздаёт этот же путь как /product-images/*.
       - /opt/skinly-storage/product-images:/app/storage/product-images
+      - playwright-cache:/root/.cache/ms-playwright
     networks:
       - skinly-net
 
 volumes:
   skinly-pg-data:
+  playwright-cache:
 
 networks:
   skinly-net:
