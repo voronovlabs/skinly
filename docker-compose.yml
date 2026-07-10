@@ -99,6 +99,12 @@ services:
       - ./prisma:/app/prisma:ro
       # Куда скрейпер пишет JSONL и checkpoint. Должна быть writable.
       - ./data:/app/data
+      # Отчёты аудита/миграции. Writable — скрипты пишут reports/*.json|csv.
+      - ./reports:/app/reports
+      # Хранилище перенесённых изображений товаров (migrate-product-images.ts).
+      # Bind mount с ХОСТА — картинки НЕ попадают в Docker image и НЕ теряются
+      # при rebuild. Caddy на хосте раздаёт этот же путь как /product-images/*.
+      - /opt/skinly-storage/product-images:/app/storage/product-images
     networks:
       - skinly-net
 

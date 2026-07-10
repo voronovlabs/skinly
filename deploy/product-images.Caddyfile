@@ -1,0 +1,49 @@
+# =============================================================================
+# Skinly — раздача перенесённых изображений товаров напрямую с диска (Caddy).
+#
+# Вставьте блок `handle_path /product-images/*` ВНУТРЬ site-блока вашего домена,
+# ПЕРЕД `reverse_proxy` на Next. Картинки НЕ проксируются через Next.js —
+# Caddy отдаёт их прямо с файловой системы (быстро, дёшево, без нагрузки на Node).
+#
+# Storage на хосте: /opt/skinly-storage/product-images
+#   (тот же путь bind-mount'ится в tools-контейнер как /app/storage/product-images,
+#    куда пишет scripts/migrate-product-images.ts)
+#
+# URL в БД после миграции: https://<домен>/product-images/ab/cd/<sha256>.jpg
+# =============================================================================
+
+skinly.msvoronov.com {
+    encode zstd gzip
+
+    # ── Локальные изображения товаров ──────────────────────────────────────
+    handle_path /product-images/* {
+        root * /opt/skinly-storage/product-images
+
+        # Только чтение статики; никакого directory listing.
+        file_server {
+            # browse НЕ включаем → нет листинга директорий
+            precompressed
+        }
+
+        # Долгий кэш: имена файлов контент-адресны (sha256), поэтому immutable.
+        header Cache-Control "public, max-age=2592000, immutable"
+        header X-Content-Type-Options "nosniff"
+        # На всякий случай — отключаем исполнение/фрейминг для этого пути.
+        header -Server
+    }
+
+    # ── Всё остальное — на Next ────────────────────────────────────────────
+    reverse_proxy 127.0.0.1:3000
+}
+
+# -----------------------------------------------------------------------------
+# Nginx-эквивалент (если вместо Caddy используется Nginx):
+#
+#   location /product-images/ {
+#       alias /opt/skinly-storage/product-images/;
+#       autoindex off;                        # запрет листинга
+#       add_header Cache-Control "public, max-age=2592000, immutable";
+#       add_header X-Content-Type-Options "nosniff";
+#       try_files $uri =404;
+#   }
+# -----------------------------------------------------------------------------

@@ -200,6 +200,9 @@ model Product {
   category      ProductCategory     @default(OTHER)
   emoji         String?
   imageUrl      String?
+  /// Original external image URL, preserved before local-storage migration
+  /// (see scripts/migrate-product-images.ts). Null = never migrated.
+  sourceImageUrl String?
 
   descriptionRu String?
   descriptionEn String?

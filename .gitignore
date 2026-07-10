@@ -56,3 +56,10 @@ prisma/dev.db-journal
 /data/raw/
 /data/state/
 /data/debug/
+
+# Generated audit/migration reports (артефакты запуска, не код)
+/reports/product-image-*.json
+/reports/product-image-*.csv
+
+# Local product-image storage (bind-mounted from host in prod)
+/storage/
