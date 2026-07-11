@@ -17,6 +17,11 @@
  *   npx tsx scripts/bench-recommendations.ts --url http://localhost:3000
  *   npx tsx scripts/bench-recommendations.ts --runs 9
  *
+ * Before/after сравнение fast-path (MV из sql/dm/34_reco_candidates.sql)
+ * против legacy SQL:
+ *   npx tsx scripts/bench-recommendations.ts --legacy | tee reco-bench-before.log
+ *   npx tsx scripts/bench-recommendations.ts          | tee reco-bench-after.log
+ *
  * Скрипт read-only: ничего не пишет в БД, продуктовый код не меняет.
  */
 
@@ -37,6 +42,7 @@ function arg(name: string): string | null {
 
 const ARG_BARCODE = arg("barcode");
 const ARG_URL = arg("url"); // например http://localhost:3000
+const ARG_LEGACY = process.argv.includes("--legacy");
 const RUNS = Math.max(3, Number(arg("runs") ?? 7));
 
 /** Профиль «худшего случая»: триггерит sensitivity/avoided/concern-правила. */
@@ -208,6 +214,35 @@ async function printIndexCheck(): Promise<void> {
     console.log("  Прочие индексы dm.*:");
     for (const r of extra) console.log(`    · ${r.indexname} (${r.tablename})`);
   }
+}
+
+/** MV fast-path (sql/dm/34_reco_candidates.sql): наличие + объёмы. */
+async function printFastPathCheck(): Promise<boolean> {
+  hr("2b. Fast-path MV (sql/dm/34_reco_candidates.sql)");
+  const rows = await prisma.$queryRaw<{ pc: string | null; feed: string | null }[]>(
+    Prisma.sql`
+      SELECT to_regclass('dm.product_canonical')::text  AS pc,
+             to_regclass('dm.reco_profile_feed')::text AS feed
+    `,
+  );
+  const pcOk = Boolean(rows[0]?.pc);
+  const feedOk = Boolean(rows[0]?.feed);
+  console.log(`  ${pcOk ? "✅" : "❌ ОТСУТСТВУЕТ"}  dm.product_canonical`);
+  console.log(`  ${feedOk ? "✅" : "❌ ОТСУТСТВУЕТ"}  dm.reco_profile_feed`);
+  if (pcOk) {
+    const n = await prisma.$queryRaw<{ n: number; size: string }[]>(Prisma.sql`
+      SELECT count(*)::int AS n,
+             pg_size_pretty(pg_total_relation_size('dm.product_canonical')) AS size
+      FROM dm.product_canonical
+    `);
+    console.log(`      product_canonical: ${n[0].n} строк, ${n[0].size}`);
+  }
+  if (ARG_LEGACY) {
+    console.log("  ⚠️ --legacy: RECO_LEGACY_SQL=1 — bench меряет СТАРЫЙ SQL-путь");
+  } else if (!pcOk || !feedOk) {
+    console.log("  ⚠️ MV нет → repo уйдёт в legacy-путь. Примените sql/dm/34_reco_candidates.sql");
+  }
+  return pcOk && feedOk;
 }
 
 /* ───────────────────── 3. Seed selection ───────────────────── */
@@ -425,13 +460,51 @@ const GATES = Prisma.sql`
   AND f.recognized_ratio >= 0.3
 `;
 
-async function benchExplain(seedPick: SeedPick, subject: Subject | null): Promise<void> {
+async function benchExplain(
+  seedPick: SeedPick,
+  subject: Subject | null,
+  fastPathAvailable: boolean,
+): Promise<void> {
   hr("4. EXPLAIN (ANALYZE, BUFFERS) — SQL пайплайна");
 
   const seed = await getRecoSeed(seedPick.barcode);
   if (!seed) {
     console.log("  ⚠️ seed не найден, EXPLAIN пропущен");
     return;
+  }
+
+  // Fast-path запросы (то, что реально выполняет repo при наличии MV).
+  if (fastPathAvailable && seed.cset.length > 0) {
+    await explain(
+      `FAST getRecoSeedCandidates(«${seed.category}», cset=${seed.cset.length}) — dm.product_canonical`,
+      Prisma.sql`
+        WITH ov AS (
+          SELECT pc.business_key, count(*)::int AS overlap
+          FROM dm.product_canonical pc
+          WHERE pc.category = ${seed.category}
+            AND pc.canonical_id IN (${Prisma.join(seed.cset)})
+            AND pc.business_key <> ${seed.businessKey}
+          GROUP BY pc.business_key
+        )
+        SELECT p.business_key, p.barcode, p.quality_score::int AS quality_score,
+               f.recognized_ratio::float8 AS recognized_ratio, ov.overlap
+        FROM ov
+        JOIN dm.dm_products p USING (business_key)
+        JOIN dm.product_ingredient_features f USING (business_key)
+        WHERE ${GATES}
+        ORDER BY ov.overlap DESC, p.quality_score DESC, f.recognized_ratio DESC
+        LIMIT 100
+      `,
+    );
+    await explain(
+      "FAST getRecoProfileCandidates — dm.reco_profile_feed",
+      Prisma.sql`
+        SELECT business_key, barcode, quality_score, recognized_ratio
+        FROM dm.reco_profile_feed
+        ORDER BY quality_score DESC, recognized_ratio DESC
+        LIMIT 100
+      `,
+    );
   }
 
   await explain(
@@ -452,7 +525,7 @@ async function benchExplain(seedPick: SeedPick, subject: Subject | null): Promis
 
   if (seed.cset.length > 0) {
     await explain(
-      `getRecoSeedCandidates(категория «${seed.category}», cset=${seed.cset.length})`,
+      `LEGACY getRecoSeedCandidates(категория «${seed.category}», cset=${seed.cset.length})`,
       Prisma.sql`
         WITH cand AS (
           SELECT p.business_key, p.barcode, f.canonical_ingredients,
@@ -529,7 +602,7 @@ async function benchExplain(seedPick: SeedPick, subject: Subject | null): Promis
   }
 
   await explain(
-    "getRecoProfileCandidates (profile-режим)",
+    "LEGACY getRecoProfileCandidates (profile-режим)",
     Prisma.sql`
       SELECT p.business_key, p.barcode, p.quality_score::int AS quality_score
       FROM dm.dm_products p
@@ -617,13 +690,16 @@ async function benchHttp(seeds: SeedPick[]): Promise<void> {
 /* ───────────────────────── main ───────────────────────── */
 
 async function main(): Promise<void> {
+  if (ARG_LEGACY) process.env.RECO_LEGACY_SQL = "1";
   console.log(
     `reco-bench · ${new Date().toISOString()} · runs=${RUNS}` +
+      ` · path=${ARG_LEGACY ? "LEGACY (--legacy)" : "auto (fast-path при наличии MV)"}` +
       `${ARG_BARCODE ? ` · barcode=${ARG_BARCODE}` : ""}` +
       `${ARG_URL ? ` · url=${ARG_URL}` : ""}`,
   );
   await printDbStats();
   await printIndexCheck();
+  const fastPathAvailable = await printFastPathCheck();
 
   const seeds = await pickSeeds();
   if (seeds.length === 0) {
@@ -635,7 +711,7 @@ async function main(): Promise<void> {
 
   await benchService(seeds);
   const subject = await findSubjectWithEvents();
-  await benchExplain(seeds[0], subject);
+  await benchExplain(seeds[0], subject, fastPathAvailable && !ARG_LEGACY);
   await benchHttp(seeds);
 
   hr("Готово");

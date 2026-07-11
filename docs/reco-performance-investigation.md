@@ -197,24 +197,133 @@ hydration demo store). Ничего криминального, но `effect→v
 
 ---
 
-## 4. Результаты измерений
+## 4. Результаты измерений (bench 2026-07-11, реальная БД)
 
-> ⏳ Заполняется из `reco-bench.log` (см. §2). Структура:
->
-> - объёмы БД и категорий, статус индексов;
-> - таблица этапов: run1 (холодный) / p50 / max — по сценариям
->   (гость без профиля, гость с профилем, cache-hit, user+preference)
->   и по seed'ам (большая / средняя / малая категория);
-> - EXPLAIN ANALYZE: узлы-лидеры по времени, Buffers, отсутствие индексов;
-> - HTTP e2e: ttfb/total vs серверный total (= сетевая надбавка);
-> - mobile: наличие double-fetch, цена waterfall'а экрана.
+Seed 8022297169743, категория «Волосы» (~20k товаров):
+
+| Этап | p50 | max | Доля total |
+|---|---|---|---|
+| **getRecoSeedCandidates** | **1689–2369 ms** | 2751 ms | **~95–98%** |
+| getDmCompatibilityInputs | 75–100 ms | — | ~4% |
+| getRecoSeed | 2–10 ms | — | <1% |
+| jsScoring (facts+engine ×40) | 7–15 ms | — | <1% |
+| buildItems (reasons) | <1 ms | — | ~0% |
+| **total getRecommendations** | **1695–2470 ms** | 2827 ms | 100% |
+
+EXPLAIN ANALYZE `getRecoSeedCandidates` (Execution 1792 ms): Seq Scan по
+`dm_products`, ~20 114 строк проходят фильтр категории, ~17 643 доходят до
+расчёта overlap, причём `jsonb_array_elements` разворачивается **дважды** на
+кандидата (в фильтре `overlap >= 1` и повторно в сортировке).
+
+Profile-режим: `getRecoProfileCandidates` p50 ~957 ms (EXPLAIN ~1055 ms),
+перебор 42k+ товаров с JOIN.
+
+Кэш: HTTP p50 ~48 ms при попадании, но **холодный запрос ~2.6 s** — кэш не
+решает первое открытие товара (а для залогиненных не работает вообще).
+
+Вывод: гипотеза S1 подтверждена и объясняет практически весь total. S2
+(getDmCompatibilityInputs, 75–100 ms) и CPU-этапы — второй порядок малости.
 
 ## 5. Bottleneck'и: вклад, выигрыш, сложность, приоритет
 
-> ⏳ Заполняется после §4. Формат: таблица
-> `# | узкое место | вклад в total, мс (%) | ожидаемый выигрыш | сложность | приоритет`.
+| # | Узкое место | Вклад | Ожидаемый эффект | Сложность | Приоритет |
+|---|---|---|---|---|---|
+| S1 | `getRecoSeedCandidates`: Seq Scan + 2× jsonb-explode на ~17.6k товаров | ~95–98% total (1.7–2.4 s) | total → **<300 ms** cold | средняя (новая MV + запрос + fallback) | **P0 — сделано** |
+| S1b | `getRecoProfileCandidates`: скан+JOIN 42k без LIMIT-aware доступа | ~957 ms profile-mode | → **~1–5 ms** | низкая (MV top-500) | **P1 — сделано** |
+| S2 | `getDmCompatibilityInputs`: jsonb_agg 12 полей × 40 товаров | 75–100 ms | −30–50 ms (убрать display-поля) | низкая | P2 — после re-bench |
+| A3 | кэш не работает для залогиненных | full pipeline на каждый запрос | после P0 малоактуально | средняя | P3 |
+| F1 | mobile double-fetch (профиль доезжает позже queryKey) | ×2 запроса на холодный экран | −1 полный запрос | низкая | P3 (после P0 цена ниже) |
+| F2 | mobile waterfall product → recommendations | + время product-запроса | параллелизация | низкая | P3 |
+| — | jsScoring / buildItems / serialization / auth | <20 ms суммарно | не трогать | — | — |
 
-## 6. План оптимизации
+## 6. Реализованное решение (P0 + P1)
 
-> ⏳ После §5, по убыванию (выигрыш / сложность). Кандидаты уже описаны в
-> §3 (S1–S5, A1–A3, F1–F4), но порядок и целесообразность — только по цифрам.
+### 6.1. Почему legacy-запрос был медленным
+
+Overlap считался коррелированным подзапросом `jsonb_array_elements` по
+детоастированному jsonb-массиву **каждого** из ~17.6k кандидатов категории, и
+из-за `WHERE overlap >= 1` + `ORDER BY overlap` выражение вычислялось дважды.
+Никакой индекс это не чинит: btree сужает только категорию, GIN по jsonb
+(`jsonb_path_ops`) умеет containment одного значения, но не *счёт*
+пересечений — массив всё равно разворачивается per-row, и GIN не
+комбинируется с фильтром категории в одном индексе.
+
+### 6.2. Решение: нормализованная витрина `dm.product_canonical`
+
+`sql/dm/34_reco_candidates.sql` создаёт MV «1 строка = 1 вхождение
+ингредиента в товар» (`business_key, category, canonical_id, position`,
+~1M узких строк) с индексом `(category, canonical_id) INCLUDE (business_key)`.
+
+Новый запрос (fast-path в `dm-recommendations.ts`):
+
+```sql
+WITH ov AS (
+  SELECT pc.business_key, count(*)::int AS overlap
+  FROM dm.product_canonical pc
+  WHERE pc.category = $1
+    AND pc.canonical_id IN (<cset>)      -- только ингредиенты seed'а
+    AND pc.business_key <> $2
+  GROUP BY pc.business_key
+)
+SELECT <CANDIDATE_COLS>, ov.overlap
+FROM ov
+JOIN dm.dm_products p USING (business_key)
+JOIN dm.product_ingredient_features f USING (business_key)
+WHERE <GATES>
+ORDER BY ov.overlap DESC, p.quality_score DESC, f.recognized_ratio DESC
+LIMIT 100;
+```
+
+Почему Postgres перестаёт обходить десятки тысяч JSONB-массивов: overlap
+теперь — `count(*)` по **index-only scan** posting-строк
+`(категория, ингредиент_seed'а)`. Читаются только строки, где ингредиент
+∈ cset seed'а (Σ частот ~30 ингредиентов внутри категории — десятки тысяч
+узких индексных записей вместо детоаста и двойного разворачивания 17.6k
+jsonb-массивов), heap не трогается, jsonb в плане отсутствует. Затем join
+обратно к `dm_products`/`features` только для сгруппированных ключей —
+gates и финальная сортировка прежние.
+
+Семантика идентична legacy бит-в-бит: считаются те же вхождения (включая
+дубликаты canonical_id в составе), `overlap >= 1` гарантирован группировкой,
+контракт `CandidateRow` не менялся.
+
+### 6.3. P1: `dm.reco_profile_feed`
+
+Запрос profile-режима не зависит от параметров запроса → его результат
+статичен между refresh'ами DM. MV хранит готовый top-500 (тот же SQL, те же
+gates); чтение — `ORDER BY ... LIMIT 100` по 500 строкам (~1 мс).
+
+### 6.4. Fallback и совместимость
+
+- Repo при первом вызове проверяет `to_regclass('dm.product_canonical')` /
+  `('dm.reco_profile_feed')` (кэш на процесс): MV нет → **legacy SQL**
+  (медленный, но рабочий) + `console.warn`. Деплой кода без применения SQL
+  ничего не ломает.
+- `RECO_LEGACY_SQL=1` — принудительный legacy (для A/B).
+- RECO_TIMING не менялся: этапы `getRecoSeedCandidates` /
+  `getRecoProfileCandidates` те же, пути видны в EXPLAIN-блоке bench.
+- Prisma schema не тронута (dm.* — raw SQL, как весь DM-слой).
+
+### 6.5. Деплой и re-bench (before/after)
+
+```bash
+# 1. BEFORE (можно пропустить — цифры уже есть в §4):
+npm run bench:reco -- --legacy 2>&1 | tee reco-bench-before.log
+
+# 2. Применить MV:
+psql "$DATABASE_URL" -f sql/dm/34_reco_candidates.sql
+#    (prod: docker compose --profile tools run --rm tools \
+#       npx prisma db execute --file sql/dm/34_reco_candidates.sql)
+
+# 3. AFTER:
+npm run bench:reco 2>&1 | tee reco-bench-after.log
+```
+
+В ежедневный refresh DM добавить третьим шагом:
+`SELECT dm.refresh_reco_candidates();` (после `refresh_dm_products` и
+`refresh_product_ingredient_features`).
+
+Ожидание: `getRecoSeedCandidates` p50 < 150–250 ms даже на «Волосы»/«Лицо»,
+total cold < 300 ms; profile-режим total < 150 ms. Если after-лог покажет,
+что узким стал `getDmCompatibilityInputs` (75–100 ms) — следующий шаг S2
+(убрать `inci_name`/`display_ru`/`display_en` из jsonb_agg для reco-пути).

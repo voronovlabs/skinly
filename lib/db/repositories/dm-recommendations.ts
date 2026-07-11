@@ -5,6 +5,18 @@
  * Gates (общие для всех функций):
  *   image_url валиден · brand_normalized IS NOT NULL · category <> 'Прочее'
  *   · quality_score >= 50 · recognized_ratio >= 0.3
+ *   ⚠️ Копия gates захардкожена в MV dm.reco_profile_feed
+ *   (sql/dm/34_reco_candidates.sql) — менять синхронно.
+ *
+ * Perf (bench 2026-07-11): legacy-запросы разворачивали jsonb-состав
+ * ~17–20k товаров категории на КАЖДЫЙ запрос (p50 1.7–2.4 s seed-режим,
+ * ~0.95 s profile-режим). Fast-path работает поверх MV из
+ * sql/dm/34_reco_candidates.sql:
+ *   - dm.product_canonical    → overlap = count(*) по index-only scan;
+ *   - dm.reco_profile_feed    → готовый top профильной ленты.
+ * Выдача идентична legacy (тот же счёт overlap, те же gates, та же
+ * сортировка). Если MV не применены — автоматический fallback на legacy
+ * (медленный, но рабочий). Форс legacy: env RECO_LEGACY_SQL=1.
  *
  * dm.* нет в Prisma schema → prisma.$queryRaw. Только чтение.
  */
@@ -12,6 +24,39 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { CandidateRow, SeedRow } from "@/lib/recommendations/types";
+
+/* ───────── Fast-path capability check (once per process) ───────── */
+
+let recoMvsPromise: Promise<boolean> | null = null;
+
+/** true → MV из 34_reco_candidates.sql на месте, работаем по fast-path. */
+function hasRecoMvs(): Promise<boolean> {
+  if (process.env.RECO_LEGACY_SQL === "1") return Promise.resolve(false);
+  if (!recoMvsPromise) {
+    recoMvsPromise = prisma
+      .$queryRaw<{ pc: string | null; feed: string | null }[]>(Prisma.sql`
+        SELECT to_regclass('dm.product_canonical')::text  AS pc,
+               to_regclass('dm.reco_profile_feed')::text AS feed
+      `)
+      .then((rows) => {
+        const ok = Boolean(rows[0]?.pc) && Boolean(rows[0]?.feed);
+        if (!ok) {
+          console.warn(
+            "[reco] dm.product_canonical / dm.reco_profile_feed не найдены — " +
+              "legacy SQL путь (медленный). Примените sql/dm/34_reco_candidates.sql",
+          );
+        }
+        return ok;
+      })
+      .catch(() => {
+        // Ошибка проверки не должна ломать рекомендации — уходим в legacy
+        // и позволяем повторить проверку на следующем запросе.
+        recoMvsPromise = null;
+        return false;
+      });
+  }
+  return recoMvsPromise;
+}
 
 const GATES = Prisma.sql`
   p.barcode IS NOT NULL
@@ -81,12 +126,45 @@ export async function getRecoSeed(barcode: string): Promise<SeedRow | null> {
   };
 }
 
-/** Кандидаты той же категории с ingredient_overlap к seed (overlap >= 1). */
+/**
+ * Кандидаты той же категории с ingredient_overlap к seed (overlap >= 1).
+ *
+ * Fast-path (dm.product_canonical):
+ *   overlap = count(*) GROUP BY business_key по btree-индексу
+ *   (category, canonical_id) INCLUDE (business_key). Postgres читает ТОЛЬКО
+ *   posting-строки ингредиентов seed'а внутри категории (index-only scan),
+ *   вместо детоаста + двойного jsonb_array_elements по ~17–20k составов.
+ *   Семантика count идентична legacy: считаются те же вхождения (включая
+ *   дубли canonical_id в составе кандидата), gates и сортировка те же.
+ *
+ * Legacy-path: прежний запрос (медленный) — если MV не применены.
+ */
 export async function getRecoSeedCandidates(
   seed: SeedRow,
   pool: number,
 ): Promise<CandidateRow[]> {
   if (seed.cset.length === 0) return [];
+
+  if (await hasRecoMvs()) {
+    return prisma.$queryRaw<CandidateRow[]>(Prisma.sql`
+      WITH ov AS (
+        SELECT pc.business_key, count(*)::int AS overlap
+        FROM dm.product_canonical pc
+        WHERE pc.category = ${seed.category}
+          AND pc.canonical_id IN (${Prisma.join(seed.cset)})
+          AND pc.business_key <> ${seed.businessKey}
+        GROUP BY pc.business_key
+      )
+      SELECT ${CANDIDATE_COLS}, ov.overlap
+      FROM ov
+      JOIN dm.dm_products p USING (business_key)
+      JOIN dm.product_ingredient_features f USING (business_key)
+      WHERE ${GATES}
+      ORDER BY ov.overlap DESC, p.quality_score DESC, f.recognized_ratio DESC
+      LIMIT ${pool}
+    `);
+  }
+
   return prisma.$queryRaw<CandidateRow[]>(Prisma.sql`
     WITH cand AS (
       SELECT ${CANDIDATE_COLS}, f.canonical_ingredients
@@ -115,10 +193,30 @@ export async function getRecoSeedCandidates(
   `);
 }
 
-/** Профильные кандидаты (без seed): топ по качеству/распознанности. */
+/**
+ * Профильные кандидаты (без seed): топ по качеству/распознанности.
+ *
+ * Fast-path: запрос не зависит от параметров → результат статичен между
+ * refresh'ами DM и материализован в dm.reco_profile_feed (top-500).
+ * Читаем готовые строки (~1 мс) вместо скана/джойна 42k+ товаров.
+ * MV не гарантирует порядок скана → ORDER BY повторяется по 500 строкам.
+ */
 export async function getRecoProfileCandidates(
   pool: number,
 ): Promise<CandidateRow[]> {
+  if (await hasRecoMvs()) {
+    return prisma.$queryRaw<CandidateRow[]>(Prisma.sql`
+      SELECT
+        business_key, barcode, brand, name, category, image_url,
+        quality_score, recognized_ratio, has_fragrance, has_drying_alcohol,
+        has_essential_oils, has_acids, has_retinoids, comedogenicity_max,
+        irritancy_max, allergenicity_max, top5_canonical, 0 AS overlap
+      FROM dm.reco_profile_feed
+      ORDER BY quality_score DESC, recognized_ratio DESC
+      LIMIT ${pool}
+    `);
+  }
+
   return prisma.$queryRaw<CandidateRow[]>(Prisma.sql`
     SELECT ${CANDIDATE_COLS}, 0 AS overlap
     FROM dm.dm_products p
