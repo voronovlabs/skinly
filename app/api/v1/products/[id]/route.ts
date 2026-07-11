@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { createCompatTimer } from "@/lib/compatibility/timing";
 import { apiError, apiJson, apiPreflight } from "@/lib/api/respond";
 
 /**
@@ -43,16 +44,21 @@ export async function GET(
     .toLowerCase()
     .startsWith("en");
 
+  // COMPAT_TIMING=1: этап productLoad мобильного пайплайна «подходимости»
+  // (карточка сначала грузит товар, потом считает совместимость).
+  const timer = createCompatTimer();
+
   try {
+    // Для barcode-URL первый findUnique(id) — гарантированный промах:
+    // меряем оба лукапа раздельно.
+    const byId = await timer.time("productLoad.byId", () =>
+      prisma.product.findUnique({ where: { id: idOrBarcode }, include }),
+    );
     const product =
-      (await prisma.product.findUnique({
-        where: { id: idOrBarcode },
-        include,
-      })) ??
-      (await prisma.product.findUnique({
-        where: { barcode: idOrBarcode },
-        include,
-      }));
+      byId ??
+      (await timer.time("productLoad.byBarcode", () =>
+        prisma.product.findUnique({ where: { barcode: idOrBarcode }, include }),
+      ));
 
     if (!product) {
       return apiError("not_found", "Product not found", 404);
@@ -62,11 +68,13 @@ export async function GET(
     let avgRating = 0;
     let reviewsCount = 0;
     try {
-      const agg = await prisma.productReview.aggregate({
-        where: { productId: product.id },
-        _avg: { rating: true },
-        _count: { _all: true },
-      });
+      const agg = await timer.time("reviewAggregate", () =>
+        prisma.productReview.aggregate({
+          where: { productId: product.id },
+          _avg: { rating: true },
+          _count: { _all: true },
+        }),
+      );
       avgRating = agg._avg.rating ? Math.round(agg._avg.rating * 10) / 10 : 0;
       reviewsCount = agg._count._all;
     } catch (e) {
@@ -107,7 +115,14 @@ export async function GET(
       })),
     };
 
-    return apiJson(dto);
+    const res = timer.timeSync("serialization", () => apiJson(dto));
+    if (timer.enabled) {
+      timer.count("ingredients", dto.ingredients.length);
+      timer.count("bytes", JSON.stringify(dto).length);
+      timer.note(`id=${idOrBarcode} hit=${byId ? "byId" : "byBarcode"}`);
+      timer.flush("products/:id");
+    }
+    return res;
   } catch (e) {
     console.error("[api/v1/products/:id] lookup failed:", e);
     return apiError("server_error", "Failed to load product", 500);

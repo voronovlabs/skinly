@@ -23,6 +23,11 @@ import {
   type SkinProfileSummaryLike,
 } from "@/lib/compatibility";
 import { resolveCompatibility } from "@/lib/compatibility/resolve-compatibility";
+import {
+  createCompatTimer,
+  NOOP_COMPAT_TIMER,
+  type CompatTimer,
+} from "@/lib/compatibility/timing";
 
 /**
  * /product/<id-or-barcode>
@@ -57,6 +62,7 @@ type DbProductWithIngredients = Prisma.ProductGetPayload<{
 
 async function findInDb(
   idOrBarcode: string,
+  timer: CompatTimer = NOOP_COMPAT_TIMER,
 ): Promise<DbProductWithIngredients | null> {
   const include = {
     ingredients: {
@@ -65,29 +71,31 @@ async function findInDb(
     },
   };
   try {
-    const byId = await prisma.product.findUnique({
-      where: { id: idOrBarcode },
-      include,
-    });
+    const byId = await timer.time("productLoad.byId", () =>
+      prisma.product.findUnique({ where: { id: idOrBarcode }, include }),
+    );
     if (byId) return byId;
-    return await prisma.product.findUnique({
-      where: { barcode: idOrBarcode },
-      include,
-    });
+    return await timer.time("productLoad.byBarcode", () =>
+      prisma.product.findUnique({ where: { barcode: idOrBarcode }, include }),
+    );
   } catch (e) {
     console.error("[product/page] DB lookup failed:", e);
     return null;
   }
 }
 
-async function loadServerProfile(): Promise<{
+async function loadServerProfile(
+  timer: CompatTimer = NOOP_COMPAT_TIMER,
+): Promise<{
   mode: "user" | "guest";
   serverProfile: SkinProfileSummaryLike | null;
 }> {
-  const user = await getCurrentUser();
+  const user = await timer.time("auth", () => getCurrentUser());
   if (!user) return { mode: "guest", serverProfile: null };
   try {
-    const p = await getBeautyProfileByUserId(user.id);
+    const p = await timer.time("profileLoad", () =>
+      getBeautyProfileByUserId(user.id),
+    );
     if (!p) return { mode: "user", serverProfile: null };
     return {
       mode: "user",
@@ -112,7 +120,15 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { barcode } = await params;
   const t = await getTranslations("product");
-  const db = await findInDb(barcode);
+  // ⚠️ Этот findInDb — ВТОРАЯ загрузка того же товара на просмотр страницы
+  // (page тоже зовёт findInDb; react cache() не используется). COMPAT_TIMING
+  // покажет это отдельной строкой scope=web:metadata.
+  const metaTimer = createCompatTimer();
+  const db = await findInDb(barcode, metaTimer);
+  if (metaTimer.enabled) {
+    metaTimer.note(`idOrBarcode=${barcode} dup=generateMetadata`);
+    metaTimer.flush("web:metadata");
+  }
   if (db) {
     return { title: `${db.brand} · ${db.name}` };
   }
@@ -131,10 +147,14 @@ export default async function ProductAnalysisPage({
   const t = await getTranslations("product");
   const locale = await getLocale();
 
-  const session = await loadServerProfile();
+  // COMPAT_TIMING=1: полный серверный путь web-карточки. Обратите внимание:
+  // auth/profileLoad и productLoad идут ПОСЛЕДОВАТЕЛЬНО (waterfall).
+  const timer = createCompatTimer();
+
+  const session = await loadServerProfile(timer);
 
   // 1) DB lookup
-  const db = await findInDb(idOrBarcode);
+  const db = await findInDb(idOrBarcode, timer);
   if (db) {
     return (
       <DbProductView
@@ -143,6 +163,7 @@ export default async function ProductAnalysisPage({
         mode={session.mode}
         serverProfile={session.serverProfile}
         t={t}
+        timer={timer}
       />
     );
   }
@@ -248,12 +269,14 @@ async function DbProductView({
   mode,
   serverProfile,
   t,
+  timer = NOOP_COMPAT_TIMER,
 }: {
   product: DbProductWithIngredients;
   locale: string;
   mode: "user" | "guest";
   serverProfile: SkinProfileSummaryLike | null;
   t: Awaited<ReturnType<typeof getTranslations<"product">>>;
+  timer?: CompatTimer;
 }) {
   const isEn = locale === "en";
 
@@ -265,16 +288,28 @@ async function DbProductView({
   // Flag-gated: DM-путь для реальных товаров с barcode, иначе legacy
   // (inciToFact). Берём только facts — клиентские компоненты пересчитывают
   // result под профиль сами. UI и mock-ветка не меняются.
-  const { facts } = await resolveCompatibility({
-    barcode: product.barcode,
-    legacyIngredients: product.ingredients.map((l) => ({
-      inci: l.ingredient.inci,
-      position: l.position,
-    })),
-    profile: serverProfile
-      ? summaryProfileToEngine(serverProfile)
-      : emptyProfile(),
-  });
+  const { facts } = await resolveCompatibility(
+    {
+      barcode: product.barcode,
+      legacyIngredients: product.ingredients.map((l) => ({
+        inci: l.ingredient.inci,
+        position: l.position,
+      })),
+      profile: serverProfile
+        ? summaryProfileToEngine(serverProfile)
+        : emptyProfile(),
+    },
+    timer,
+  );
+  if (timer.enabled) {
+    timer.count("facts", facts.length);
+    timer.count("legacyIngredients", product.ingredients.length);
+    timer.note(
+      `barcode=${product.barcode} mode=${mode} ` +
+        `factsBytesToClient=${JSON.stringify(facts).length}`,
+    );
+    timer.flush("web:/product");
+  }
 
   const items: IngredientsListItem[] = product.ingredients.map((l) => ({
     id: `${product.id}_${l.ingredientId}`,

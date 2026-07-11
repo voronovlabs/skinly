@@ -22,6 +22,7 @@ import { isDmCompatibilityEnabled } from "@/lib/flags";
 import { evaluateCompatibility } from "./score";
 import { inciToFact } from "./ingredients";
 import { featuresToFacts } from "./dm-adapters";
+import { NOOP_COMPAT_TIMER, type CompatTimer } from "./timing";
 import type {
   CompatibilityProfile,
   CompatibilityResult,
@@ -78,25 +79,31 @@ function isUsableDmInput(
 
 function legacyResult(
   args: ResolveCompatibilityArgs,
+  timer: CompatTimer = NOOP_COMPAT_TIMER,
 ): ResolveCompatibilityResult {
-  const facts = args.legacyIngredients.map((l) =>
-    inciToFact(l.inci, l.position),
+  const facts = timer.timeSync("featuresToFacts(legacy)", () =>
+    args.legacyIngredients.map((l) => inciToFact(l.inci, l.position)),
   );
-  return {
-    facts,
-    result: evaluateCompatibility(args.profile, facts),
-    source: "legacy",
-  };
+  const result = timer.timeSync("evaluateCompatibility", () =>
+    evaluateCompatibility(args.profile, facts),
+  );
+  return { facts, result, source: "legacy" };
 }
 
 function dmResult(
   dm: DmCompatibilityInput,
   profile: CompatibilityProfile,
+  timer: CompatTimer = NOOP_COMPAT_TIMER,
 ): ResolveCompatibilityResult {
-  const facts = featuresToFacts(dm.rows);
+  const facts = timer.timeSync("featuresToFacts", () =>
+    featuresToFacts(dm.rows),
+  );
+  const result = timer.timeSync("evaluateCompatibility", () =>
+    evaluateCompatibility(profile, facts),
+  );
   return {
     facts,
-    result: evaluateCompatibility(profile, facts),
+    result,
     source: "dm",
     recognizedRatio: dm.recognizedRatio,
     lowConfidence: dm.lowConfidence,
@@ -105,9 +112,12 @@ function dmResult(
 
 /**
  * Single-product resolve. Безопасен: любая проблема DM → legacy.
+ * `timer` — опциональное профилирование (COMPAT_TIMING=1); noop по умолчанию,
+ * поведение не меняет.
  */
 export async function resolveCompatibility(
   args: ResolveCompatibilityArgs,
+  timer: CompatTimer = NOOP_COMPAT_TIMER,
 ): Promise<ResolveCompatibilityResult> {
   const useDm = args.forceDm ?? isDmCompatibilityEnabled();
 
@@ -116,10 +126,27 @@ export async function resolveCompatibility(
       const dm =
         args.dmInput !== undefined
           ? args.dmInput
-          : await getDmCompatibilityInput(args.barcode);
+          : await timer.time("dmCompatibilityInputs", () =>
+              getDmCompatibilityInput(args.barcode!),
+            );
       // DM используем только если он есть, в нём есть состав И распознано
       // достаточно (recognizedRatio >= 0.3). Иначе — legacy.
-      if (isUsableDmInput(dm)) return dmResult(dm, args.profile);
+      if (isUsableDmInput(dm)) {
+        if (timer.enabled) {
+          // Объёмы пишем только для single-product вызова (batch уже
+          // отчитался кумулятивно как batchDmRows/batchDmInputs).
+          if (args.dmInput === undefined) {
+            timer.count("dmRows", dm.rows.length);
+            timer.count("totalIngredients", dm.totalIngredients);
+            timer.note(
+              `source=dm recognized=${dm.recognizedRatio.toFixed(2)}`,
+            );
+          } else {
+            timer.note("source=dm(batch)");
+          }
+        }
+        return dmResult(dm, args.profile, timer);
+      }
     } catch (e) {
       console.error(
         "[resolveCompatibility] DM path failed, fallback to legacy:",
@@ -127,7 +154,11 @@ export async function resolveCompatibility(
       );
     }
   }
-  return legacyResult(args);
+  if (timer.enabled) {
+    timer.count("legacyIngredients", args.legacyIngredients.length);
+    timer.note("source=legacy");
+  }
+  return legacyResult(args, timer);
 }
 
 /**
@@ -140,9 +171,10 @@ export async function resolveCompatibilityBatch(
     barcode?: string | null;
     legacyIngredients: readonly LegacyIngredient[];
   }>,
-  opts?: { forceDm?: boolean },
+  opts?: { forceDm?: boolean; timer?: CompatTimer },
 ): Promise<ResolveCompatibilityResult[]> {
   const useDm = opts?.forceDm ?? isDmCompatibilityEnabled();
+  const timer = opts?.timer ?? NOOP_COMPAT_TIMER;
 
   let dmMap = new Map<string, DmCompatibilityInput>();
   if (useDm) {
@@ -151,7 +183,16 @@ export async function resolveCompatibilityBatch(
       .filter((b): b is string => !!b);
     if (barcodes.length > 0) {
       try {
-        dmMap = await getDmCompatibilityInputs(barcodes);
+        dmMap = await timer.time("dmCompatibilityInputs(batch)", () =>
+          getDmCompatibilityInputs(barcodes),
+        );
+        if (timer.enabled) {
+          timer.count("batchBarcodes", barcodes.length);
+          timer.count("batchDmInputs", dmMap.size);
+          let rows = 0;
+          for (const dm of dmMap.values()) rows += dm.rows.length;
+          timer.count("batchDmRows", rows);
+        }
       } catch (e) {
         console.error(
           "[resolveCompatibilityBatch] DM batch failed, fallback to legacy:",

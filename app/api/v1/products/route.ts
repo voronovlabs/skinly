@@ -9,6 +9,7 @@ import {
   type SkinProfileSummaryLike,
 } from "@/lib/compatibility";
 import { resolveCompatibilityBatch } from "@/lib/compatibility/resolve-compatibility";
+import { createCompatTimer } from "@/lib/compatibility/timing";
 import { apiError, apiJson, apiPreflight } from "@/lib/api/respond";
 
 /**
@@ -91,17 +92,23 @@ export async function GET(req: NextRequest) {
     : null;
 
   const timing = process.env.SEARCH_TIMING === "1";
+  // COMPAT_TIMING=1: forMe-ветка этого route — серверная часть блока
+  // «Подходимость товара» на mobile (compatibilityApi.evaluate дергает
+  // именно /products?forMe=1&q=<barcode>). Меряем этапы + объёмы.
+  const compatTimer = createCompatTimer();
   const tList = Date.now();
 
   try {
-    const page = await listProducts({
-      cursor,
-      q,
-      category,
-      // Ингредиенты нужны только для forMe-скоринга. Для обычного поиска — нет.
-      withIngredients: Boolean(profile),
-      limit,
-    });
+    const page = await compatTimer.time("productLoad(list+ingredients)", () =>
+      listProducts({
+        cursor,
+        q,
+        category,
+        // Ингредиенты нужны только для forMe-скоринга. Для обычного поиска — нет.
+        withIngredients: Boolean(profile),
+        limit,
+      }),
+    );
     const listMs = Date.now() - tList;
 
     if (!profile) {
@@ -134,20 +141,24 @@ export async function GET(req: NextRequest) {
         barcode: item.barcode,
         legacyIngredients: item.inciList ?? [],
       })),
+      { timer: compatTimer },
     );
     const compatibilityMs = Date.now() - tCompat;
 
     const tSer = Date.now();
-    const scored: ProductListItem[] = page.items.map((item, i) => {
-      const r = resolved[i];
-      const hasFacts = r.facts.length > 0;
-      return {
-        ...strip(item),
-        score: hasFacts ? r.result.score : null,
-        verdict: hasFacts ? r.result.verdict : null,
-      };
+    const scored: ProductListItem[] = compatTimer.timeSync("buildItems", () => {
+      const s: ProductListItem[] = page.items.map((item, i) => {
+        const r = resolved[i];
+        const hasFacts = r.facts.length > 0;
+        return {
+          ...strip(item),
+          score: hasFacts ? r.result.score : null,
+          verdict: hasFacts ? r.result.verdict : null,
+        };
+      });
+      s.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+      return s;
     });
-    scored.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
     const serializeMs = Date.now() - tSer;
 
     if (timing) {
@@ -158,10 +169,21 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    return apiJson(
-      { items: scored, nextCursor: page.nextCursor, total: page.total },
-      { cache: "no-store" },
+    const body = { items: scored, nextCursor: page.nextCursor, total: page.total };
+    const res = compatTimer.timeSync("serialization", () =>
+      apiJson(body, { cache: "no-store" }),
     );
+    if (compatTimer.enabled) {
+      compatTimer.count("items", scored.length);
+      compatTimer.count(
+        "legacyInciLoaded",
+        page.items.reduce((s, it) => s + (it.inciList?.length ?? 0), 0),
+      );
+      compatTimer.count("bytes", JSON.stringify(body).length);
+      compatTimer.note(`q=${q ?? "—"} forMe=1 limit=${limit ?? "def"}`);
+      compatTimer.flush("products?forMe");
+    }
+    return res;
   } catch (e) {
     console.error("[api/v1/products] list failed:", e);
     return apiError("server_error", "Failed to load products", 500);

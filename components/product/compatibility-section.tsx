@@ -47,6 +47,23 @@ import type {
 
 type T = (key: string, args?: Record<string, string | number>) => string;
 
+/**
+ * Client-профилирование блока «Подходимость» (dev всегда; prod — через
+ * `localStorage.setItem("skinly:compat-timing", "1")`). Каждый лог = один
+ * пересчёт useMemo: несколько строк на открытие карточки = лишние ререндеры
+ * (смена ссылки profile/facts) — это находка.
+ */
+let compatEvalCount = 0;
+function compatTimingEnabled(): boolean {
+  if (typeof window === "undefined") return false;
+  if (process.env.NODE_ENV === "development") return true;
+  try {
+    return window.localStorage.getItem("skinly:compat-timing") === "1";
+  } catch {
+    return false;
+  }
+}
+
 export interface ProductCompatibilitySectionProps {
   mode: "user" | "guest";
   /** Ингредиенты продукта (INCI + позиция). Сервер уже подготовил. */
@@ -78,7 +95,17 @@ export function ProductCompatibilitySection({
 
   const result = useMemo<CompatibilityResult | null>(() => {
     if (!ready) return null;
-    return evaluateCompatibility(profile, facts);
+    if (!compatTimingEnabled()) return evaluateCompatibility(profile, facts);
+    const t0 = performance.now();
+    const r = evaluateCompatibility(profile, facts);
+    compatEvalCount += 1;
+    // eslint-disable-next-line no-console
+    console.log(
+      `[compat-timing:web] evaluate#${compatEvalCount} ` +
+        `engine=${(performance.now() - t0).toFixed(1)}ms facts=${facts.length} ` +
+        `score=${r.score} verdict=${r.verdict}`,
+    );
+    return r;
   }, [ready, profile, facts]);
 
   if (!ready) {
