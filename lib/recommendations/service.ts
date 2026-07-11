@@ -181,16 +181,36 @@ export async function getRecommendations(
   const topK = preScored.slice(0, Math.max(COMPAT_TOP_K, limit));
   let scored: ScoredCandidate[] = topK;
 
+  // Счётчики для RECO_TIMING (не влияют на выдачу; при noop-таймере — нули).
+  let dmInputsSize = 0;
+  let factsTotal = 0;
+  let tFacts = 0; // кумулятивно: featuresToFacts (адаптер DM → engine facts)
+  let tEngine = 0; // кумулятивно: evaluateCompatibility (rule-engine)
+
   if (!profileEmpty) {
     const dmInputs = await timer.time("getDmCompatibilityInputs", () =>
       getDmCompatibilityInputs(topK.map((s) => s.cand.barcode)),
     );
+    dmInputsSize = dmInputs.size;
     scored = timer.timeSync("jsScoring", () =>
       topK.map((s) => {
         const c = s.cand;
         const dm = dmInputs.get(c.barcode);
-        const facts = dm ? featuresToFacts(dm.rows) : [];
-        const compat = evaluateCompatibility(engineProfile, facts);
+        let facts: ReturnType<typeof featuresToFacts>;
+        let compat: ReturnType<typeof evaluateCompatibility>;
+        if (timer.enabled) {
+          // Сплит jsScoring: сколько уходит на адаптер, сколько на движок.
+          const f0 = performance.now();
+          facts = dm ? featuresToFacts(dm.rows) : [];
+          const f1 = performance.now();
+          compat = evaluateCompatibility(engineProfile, facts);
+          tEngine += performance.now() - f1;
+          tFacts += f1 - f0;
+          factsTotal += facts.length;
+        } else {
+          facts = dm ? featuresToFacts(dm.rows) : [];
+          compat = evaluateCompatibility(engineProfile, facts);
+        }
         const risk = computeRiskPenalty(
           profile, c, compat.triggeredAvoided.length,
         );
@@ -214,6 +234,10 @@ export async function getRecommendations(
         };
       }),
     );
+    if (timer.enabled) {
+      timer.mark("jsScoring.featuresToFacts", tFacts);
+      timer.mark("jsScoring.evaluateCompatibility", tEngine);
+    }
   }
 
   // ── Hard compatibility-gate (только при наличии профиля) ──
@@ -274,7 +298,10 @@ export async function getRecommendations(
   timer.note(
     `barcode=${params.barcode ?? "—"} mode=${seed ? "seed" : "profile"} ` +
       `pool=${candidates.length} topK=${topK.length} ` +
-      `compat=${profileEmpty ? "skipped" : "computed"} final=${top.length}`,
+      `compat=${profileEmpty ? "skipped" : "computed"} ` +
+      `dmInputs=${dmInputsSize} factsTotal=${factsTotal} ` +
+      `subject=${subject ? (subject.userId ? "user" : "anon") : "none"} ` +
+      `pref=${preference ? preference.eventCount : 0} final=${top.length}`,
   );
   debugLog({
     params, seed, lowSeedConfidence, candidates,

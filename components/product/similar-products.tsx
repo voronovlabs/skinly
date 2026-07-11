@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Card, Tag } from "@/components/ui";
 import { cn } from "@/lib/cn";
@@ -49,6 +49,23 @@ export interface SimilarProductsProps {
 
 const LIMIT = 10;
 
+/**
+ * Client-профилирование блока «Похожие товары» (frontend-этап пайплайна
+ * рекомендаций). Включено в dev всегда; в prod — через
+ * `localStorage.setItem("skinly:reco-timing", "1")`. Ничего не меняет в
+ * поведении, только console.log с разбивкой:
+ *   effect→headers (сеть+сервер) → json (парсинг) → render (коммит DOM).
+ */
+function recoTimingEnabled(): boolean {
+  if (typeof window === "undefined") return false;
+  if (process.env.NODE_ENV === "development") return true;
+  try {
+    return window.localStorage.getItem("skinly:reco-timing") === "1";
+  } catch {
+    return false;
+  }
+}
+
 export function SimilarProducts({
   barcode,
   mode,
@@ -57,21 +74,62 @@ export function SimilarProducts({
 }: SimilarProductsProps) {
   const { state, hydrated } = useDemoStore();
   const [items, setItems] = useState<RecItem[] | null>(null);
+  // reco-timing: t0 = старт fetch-effect'а; fetchCount ловит повторные fetch'и
+  // (лишние ре-запросы из-за смены deps — сами по себе находка).
+  const perfRef = useRef<{ t0: number; tJson: number; fetches: number }>({
+    t0: 0,
+    tJson: 0,
+    fetches: 0,
+  });
 
   const ready = mode === "user" || hydrated;
 
   useEffect(() => {
     if (!ready || !barcode) return;
+    const timing = recoTimingEnabled();
+    const t0 = performance.now();
+    perfRef.current.t0 = t0;
+    perfRef.current.fetches += 1;
+    const fetchNo = perfRef.current.fetches;
+    let tHeaders = 0;
     const profile: LooseProfile | null =
       mode === "user" ? serverProfile ?? null : state.skinProfile;
     const qs = buildQuery(barcode, profile);
     const ctrl = new AbortController();
     fetch(`/api/v1/recommendations?${qs}`, { signal: ctrl.signal })
-      .then((r) => (r.ok ? r.json() : { items: [] }))
-      .then((d: { items?: RecItem[] }) => setItems(d.items ?? []))
+      .then((r) => {
+        tHeaders = performance.now();
+        return r.ok ? r.json() : { items: [] };
+      })
+      .then((d: { items?: RecItem[] }) => {
+        const tJson = performance.now();
+        perfRef.current.tJson = tJson;
+        if (timing) {
+          // eslint-disable-next-line no-console
+          console.log(
+            `[reco-timing:web] fetch#${fetchNo} barcode=${barcode} ` +
+              `headers=${(tHeaders - t0).toFixed(1)}ms ` +
+              `json=${(tJson - tHeaders).toFixed(1)}ms ` +
+              `items=${d.items?.length ?? 0}`,
+          );
+        }
+        setItems(d.items ?? []);
+      })
       .catch(() => setItems([]));
     return () => ctrl.abort();
   }, [ready, barcode, mode, serverProfile, state.skinProfile]);
+
+  // reco-timing: коммит DOM после setItems (закрывает этап «рендер»).
+  useEffect(() => {
+    if (items == null || !recoTimingEnabled()) return;
+    const { t0, tJson } = perfRef.current;
+    if (t0 === 0) return;
+    // eslint-disable-next-line no-console
+    console.log(
+      `[reco-timing:web] render=${(performance.now() - tJson).toFixed(1)}ms ` +
+        `effect→visible=${(performance.now() - t0).toFixed(1)}ms items=${items.length}`,
+    );
+  }, [items]);
 
   if (!items || items.length === 0) return null;
 
