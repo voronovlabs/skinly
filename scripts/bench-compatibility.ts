@@ -34,6 +34,7 @@ import {
   resolveCompatibility,
   resolveCompatibilityBatch,
 } from "@/lib/compatibility/resolve-compatibility";
+import { formatRuleHits } from "@/lib/compatibility/format-reasons";
 import type { CompatTimer } from "@/lib/compatibility/timing";
 import { listProducts } from "@/lib/db/repositories/product";
 import { getBeautyProfileByUserId } from "@/lib/db/repositories/beauty-profile";
@@ -372,6 +373,84 @@ async function benchMobilePath(picks: Pick[]): Promise<void> {
   }
 }
 
+/* ───────── 4b. NEW: /products/:id/compatibility (AFTER-путь) ───────── */
+
+/**
+ * Точная реплика внутренностей app/api/v1/products/[id]/compatibility:
+ * лёгкий findUnique(barcode) → resolveCompatibility → formatRuleHits.
+ * Кэш роута здесь НЕ используется — меряем холодную работу; тёплую
+ * (cache hit) показывает HTTP-режим (run2+).
+ */
+async function benchNewEndpoint(picks: Pick[]): Promise<void> {
+  hr(`4b. NEW endpoint path (/products/:id/compatibility) — ${RUNS} прогонов`);
+  console.log(
+    "  AFTER-путь мобильной подходимости: точечный lookup вместо searchProducts.",
+  );
+  const engineProfile = summaryProfileToEngine(FULL_PROFILE_SUMMARY);
+  const select = {
+    id: true,
+    barcode: true,
+    ingredients: {
+      select: { position: true, ingredient: { select: { inci: true } } },
+      orderBy: { position: "asc" as const },
+    },
+  };
+
+  for (const pick of picks) {
+    console.log(`\n  ── ${pick.label}: barcode ${pick.barcode} ──`);
+    const totals: number[] = [];
+    const perStage = new Map<string, number[]>();
+    let counts = new Map<string, number>();
+    let metas: string[] = [];
+    for (let run = 0; run < RUNS; run++) {
+      const { timer, result } = createCollectingTimer();
+      const product = await timer.time("productLoad.byBarcode", () =>
+        prisma.product.findUnique({ where: { barcode: pick.barcode }, select }),
+      );
+      if (!product) break;
+      const resolved = await resolveCompatibility(
+        {
+          barcode: product.barcode,
+          legacyIngredients: product.ingredients.map((l) => ({
+            inci: l.ingredient.inci,
+            position: l.position,
+          })),
+          profile: engineProfile,
+        },
+        timer,
+      );
+      const dto = timer.timeSync("buildExplanation", () => ({
+        productId: product.id,
+        barcode: product.barcode,
+        score: resolved.result.score,
+        verdict: resolved.result.verdict,
+        lowConfidence: resolved.result.lowConfidence,
+        source: resolved.source,
+        reasons: formatRuleHits(resolved.result.reasons, "ru"),
+        positives: formatRuleHits(resolved.result.positives, "ru"),
+        warnings: formatRuleHits(resolved.result.warnings, "ru"),
+      }));
+      const bytes = timer.timeSync(
+        "serialization",
+        () => JSON.stringify(dto).length,
+      );
+      timer.flush();
+      timer.count("bytes", bytes);
+      timer.count("reasons", dto.reasons.length);
+      totals.push(result.total);
+      if (run === 0) {
+        counts = result.counts;
+        metas = result.metas;
+      }
+      for (const [label, ms] of result.stages) {
+        if (!perStage.has(label)) perStage.set(label, []);
+        perStage.get(label)!.push(ms);
+      }
+    }
+    printRuns(totals, perStage, counts, metas);
+  }
+}
+
 /* ───────────────────── 5. EXPLAIN ANALYZE ───────────────────── */
 
 async function explain(label: string, query: Prisma.Sql): Promise<void> {
@@ -533,8 +612,15 @@ async function benchHttp(picks: Pick[]): Promise<void> {
       `${ARG_URL}/api/v1/products/${pick.barcode}`,
     );
     await httpProbe(
-      "GET /products?forMe=1&q=…     ",
+      "BEFORE /products?forMe=1&q=…  ",
       `${ARG_URL}/api/v1/products?forMe=1&q=${pick.barcode}&limit=10&${profileQs}`,
+    );
+    await httpProbe(
+      "AFTER  /products/:b/compat…   ",
+      `${ARG_URL}/api/v1/products/${pick.barcode}/compatibility?${profileQs}`,
+    );
+    console.log(
+      "    (AFTER: run1 = cache miss (холодная работа), run2+ = cache hit — warm)",
     );
   }
 }
@@ -563,7 +649,8 @@ async function main(): Promise<void> {
 
   await benchProfileLoad();
   await benchWebPath(picks);
-  await benchMobilePath(picks);
+  await benchMobilePath(picks); // BEFORE: старый mobile-путь через forMe
+  await benchNewEndpoint(picks); // AFTER: точечный endpoint
   await benchExplain(picks[picks.length - 1]); // самый большой состав
   await benchHttp(picks);
 

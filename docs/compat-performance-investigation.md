@@ -184,12 +184,93 @@ npm run bench:compat -- --url http://localhost:3000 2>&1 | tee -a compat-bench.l
 4. **Web** (`dev`): `evaluate#N engine=…ms facts=…` (N>1 на одну карточку =
    лишние пересчёты).
 
-## 6. Результаты измерений
+## 6. Результаты измерений (bench 2026-07-11, реальная БД)
 
-> ⏳ Заполняется после присланных логов.
+Движок и DM-путь быстрые, проблема — только в архитектуре mobile-пути:
 
-## 7. Bottleneck'и и план оптимизации
+| Этап | p50 |
+|---|---|
+| getDmCompatibilityInput (1 barcode) | 3–7 ms |
+| featuresToFacts | <0.1 ms |
+| evaluateCompatibility | <1 ms |
+| **WEB path целиком (single-product)** | **10–20 ms** |
+| **MOBILE path** `GET /products?forMe=1&q=<barcode>` **total** | **2480–2713 ms** |
+| — из них productLoad(list+ingredients) | 2526–2749 ms |
+| — dmCompatibilityInputs(batch) | 4–7 ms |
 
-> ⏳ После §6. Требования к изменениям: бизнес-логика оценки и verdict/reasons
-> не меняются, контракт API сохраняется, fallback обязателен, before/after
-> bench, блок «Похожие продукты» не затрагивается.
+EXPLAIN `searchProducts(q=barcode)`: **Seq Scan** по `public.Product`,
+Rows Removed by Filter: 63 449, Execution ~2570 ms — `LIKE '%barcode%'`
+по brand/name/category/barcode. При этом `itemsScored=1`: каталожный поиск
+по всей таблице выполнялся ради совместимости одного товара.
+
+Подтверждены: **C1** (главный, ~97% total), C2 (двойной HTTP + double-fetch),
+плюс UX-дефект — backend reasons затирались пустыми массивами.
+
+## 7. Реализованное решение (P0)
+
+### 7.1. Новый endpoint `GET /api/v1/products/:idOrBarcode/compatibility`
+
+`app/api/v1/products/[id]/compatibility/route.ts`:
+точечный `findUnique(id → barcode)` с лёгким select (только inci+position)
+→ существующий `resolveCompatibility` (DM `getDmCompatibilityInput(1 barcode)`
+→ fallback на legacy `inciToFact` при recognizedRatio < 0.3 / ошибке DM)
+→ `formatRuleHits` → DTO `{productId, barcode, score, verdict, lowConfidence,
+source, reasons[], positives[], warnings[]}` (формат = mobile
+`CompatibilityReason {key, text, kind}`).
+
+**searchProducts исключён полностью** — endpoint не зовёт
+`listProducts`; каталожный поиск и «Похожие продукты» не тронуты.
+Бизнес-логика score/verdict — тот же `evaluateCompatibility`, без изменений.
+Тексты причин — те же i18n-строки `compatibility.*` (messages/ru|en.json),
+что видит web: `lib/compatibility/format-reasons.ts` (интерполяция ICU +
+локализация enum-аргументов, dedupe + top-4 — правила отображения web-блока).
+
+### 7.2. Кэш
+
+`lib/compatibility/compat-cache.ts` — in-memory TTL по
+`idOrBarcode::locale::profile-fingerprint` (10 мин, LRU 500, frozen;
+`COMPAT_CACHE=0` отключает, `COMPAT_CACHE_TTL_MS` меняет TTL). Безопасно:
+ответ детерминирован между refresh'ами DM/каталога.
+
+### 7.3. Mobile
+
+- `compatibility.api.ts`: зовёт новый endpoint; **reasons/positives/warnings
+  берутся из backend и больше не затираются**; локальный mock — только
+  fallback (нет профиля / нет barcode / сеть или backend упали) — поведение
+  guest-режима прежнее.
+- `useCompatibility`: `enabled` ждёт settled-профиль → double-fetch по
+  profileKey устранён (для гостя профиль из MMKV мгновенный — задержки нет).
+
+### 7.4. COMPAT_TIMING
+
+Сохранён: новый route логирует productLoad.byId/.byBarcode,
+dmCompatibilityInputs, featuresToFacts, evaluateCompatibility,
+buildExplanation, serialization + counts (facts, bytes) + `cache=hit|miss`.
+
+### 7.5. Деплой и re-bench (before/after)
+
+Порядок выката: **сначала backend** (endpoint аддитивный), потом mobile —
+старый клиент продолжает работать через прежний путь.
+
+```bash
+# сервер с новым endpoint:
+COMPAT_TIMING=1 npm run dev                       # терминал 1
+npm run bench:compat -- --url http://localhost:3000 2>&1 | tee compat-bench-after.log
+```
+
+В bench добавлены: секция «4b. NEW endpoint path» (service-level AFTER;
+секция 4 MOBILE path осталась как BEFORE) и HTTP-probe
+`AFTER /products/:b/compatibility` (run1 = cache miss, run2+ = hit → warm).
+
+Ожидание: cold ≈ 10–30 ms server-side (+сеть) вместо ~2.5 s; warm (cache hit)
+≈ 1–3 ms; verdict на экране — после одного быстрого запроса вместо
+каталожного поиска, без повторного fetch'а при позднем профиле.
+
+### 7.6. Осталось (вторичное, не блокирует P0)
+
+- **web:** дубль `findInDb` (generateMetadata + page) → `react cache()`;
+  двойной расчёт движка (сервер + клиент) и facts в RSC payload;
+- **C4:** убрать `inci_name`/`display_ru`/`display_en` из `queryCompatRows`
+  для путей, где они не нужны (сейчас DM-вход 3–7 ms — низкий приоритет);
+- mobile: `GET /products/:id` мог бы сразу включать compatibility при
+  наличии профиля (вариант b) — рассмотреть после замеров нового пути.
