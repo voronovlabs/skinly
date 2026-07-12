@@ -483,7 +483,21 @@
       "combinationBalanced": "{ingredient} balances combination skin",
       "normalMaintenance": "{ingredient} supports a healthy skin baseline",
       "goalAlignment": "{ingredient} aligns with your goal: {goal}",
-      "comedogenicForAcne": "{ingredient} may worsen breakouts"
+      "comedogenicForAcne": "{ingredient} may worsen breakouts",
+      "avoidedFlagMany": "{count} ingredients from your avoid list ({avoided}): {examples}",
+      "sensitiveTriggerMany": "{count} potential irritants for sensitive skin: {examples}",
+      "activeForSensitiveMany": "{count} strong actives — patch-test recommended for sensitive skin: {examples}",
+      "helpsConcernMany": "{count} ingredients help with {concern}: {examples}",
+      "cautionForConcernMany": "{count} ingredients may worsen {concern}: {examples}",
+      "dryFriendlyMany": "{count} hydrating and barrier ingredients for dry skin: {examples}",
+      "dryStrippingMany": "{count} potentially drying ingredients: {examples}",
+      "oilyHeavyMany": "{count} heavy oils — use with care on oily skin: {examples}",
+      "oilyLightHydrationMany": "{count} lightweight hydrators suitable for oily skin: {examples}",
+      "combinationComedogenicMany": "{count} potentially comedogenic ingredients: {examples}",
+      "combinationBalancedMany": "{count} ingredients balance combination skin: {examples}",
+      "normalMaintenanceMany": "{count} ingredients support a healthy baseline: {examples}",
+      "goalAlignmentMany": "{count} ingredients align with your goal \"{goal}\": {examples}",
+      "concernNotCovered": "No ingredients targeting \"{concern}\" were found in this formula"
     }
   },
   "tutorial": {

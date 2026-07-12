@@ -483,7 +483,21 @@
       "combinationBalanced": "{ingredient} балансирует комбинированную кожу",
       "normalMaintenance": "{ingredient} поддерживает здоровый барьер",
       "goalAlignment": "{ingredient} работает на вашу цель: {goal}",
-      "comedogenicForAcne": "{ingredient} может усиливать высыпания"
+      "comedogenicForAcne": "{ingredient} может усиливать высыпания",
+      "avoidedFlagMany": "{count} компонентов из вашего списка избегаемых ({avoided}): {examples}",
+      "sensitiveTriggerMany": "{count} потенциальных раздражителей для чувствительной кожи: {examples}",
+      "activeForSensitiveMany": "{count} сильных активов — чувствительной коже нужен patch-test: {examples}",
+      "helpsConcernMany": "{count} компонентов помогают при {concern}: {examples}",
+      "cautionForConcernMany": "{count} компонентов могут усугубить {concern}: {examples}",
+      "dryFriendlyMany": "{count} увлажняющих и барьерных компонентов для сухой кожи: {examples}",
+      "dryStrippingMany": "{count} подсушивающих компонентов: {examples}",
+      "oilyHeavyMany": "{count} тяжёлых масел — жирной коже стоит быть осторожнее: {examples}",
+      "oilyLightHydrationMany": "{count} лёгких увлажнителей, подходящих жирной коже: {examples}",
+      "combinationComedogenicMany": "{count} потенциально комедогенных компонентов: {examples}",
+      "combinationBalancedMany": "{count} компонентов балансируют комбинированную кожу: {examples}",
+      "normalMaintenanceMany": "{count} компонентов поддерживают здоровый барьер: {examples}",
+      "goalAlignmentMany": "{count} компонентов работают на вашу цель «{goal}»: {examples}",
+      "concernNotCovered": "Компонентов, направленных на «{concern}», в составе не найдено"
     }
   },
   "tutorial": {

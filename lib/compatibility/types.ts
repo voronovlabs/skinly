@@ -116,8 +116,12 @@ export interface RuleHit {
   key: string;
   /** Аргументы для ICU. */
   args?: Record<string, string | number>;
-  /** Положительная (плюс к score) или предупреждающая (минус). */
-  kind: "positive" | "warning";
+  /**
+   * Положительная (плюс к score), предупреждающая (минус) или
+   * информационная (weight=0, только explainability — например
+   * `concernNotCovered`; в positives/warnings и в score не попадает).
+   */
+  kind: "positive" | "warning" | "info";
   /** Δ-score от этого hit'а. Положительный — буст, отрицательный — штраф. */
   weight: number;
   /** Ингредиент, спровоцировавший правило (если применимо). */

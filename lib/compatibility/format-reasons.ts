@@ -96,8 +96,11 @@ export function formatRuleHit(
       ? { ingredient: hit.inci }
       : {}),
   });
+  // Суффикс concern/avoided делает key уникальным, когда один шаблон
+  // сработал для разных концернов (mobile использует key как React key).
+  const suffix = hit.concern ?? hit.avoided ?? "";
   return {
-    key: path.replace(/^reasons\./, ""),
+    key: path.replace(/^reasons\./, "") + (suffix ? `:${suffix}` : ""),
     text: interpolate(template, args),
     kind: hit.kind,
   };

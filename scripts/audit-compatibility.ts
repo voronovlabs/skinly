@@ -135,6 +135,15 @@ function shortKey(k: string): string {
   return k.replace(/^compatibility\.reasons\./, "").replace(/^compatibility\./, "");
 }
 
+/**
+ * Нормализация для детекторов: после Phase 1 reasons могут приходить
+ * сгруппированными (`dryFriendlyMany`) — при сравнении с warning/positive
+ * keys срезаем суффикс Many, чтобы не плодить ложные C3/A1.
+ */
+function baseKey(k: string): string {
+  return k.replace(/Many$/, "").replace(/:.*$/, "");
+}
+
 /* ───────────────────── Типы записей ───────────────────── */
 
 interface ProductInfo {
@@ -476,8 +485,9 @@ function detectAnomalies(
       }
       // C3
       if (rec.warningsCount > 0 && rec.reasonKeys.length > 0) {
+        const warnBase = new Set(rec.warningKeys.map(baseKey));
         const warnInReasons = rec.reasonKeys.some((k) =>
-          rec.warningKeys.includes(k),
+          warnBase.has(baseKey(k)),
         );
         if (!warnInReasons) {
           push({
@@ -510,7 +520,8 @@ function detectAnomalies(
           details: "reasons пустые при непустом составе",
         });
       }
-      const dup = rec.reasonKeys.length !== new Set(rec.reasonKeys).size;
+      const dup =
+        rec.reasonKeys.length !== new Set(rec.reasonKeys).size;
       if (dup) {
         push({
           type: "D2_duplicate_reasons",
@@ -614,9 +625,11 @@ function detectAnomalies(
         });
       }
       // A1: concern есть, состав релевантен, но Δ=0 и нет concern-reason.
+      const reasonBase = rec.reasonKeys.map(baseKey);
       const concernReason =
-        rec.reasonKeys.includes("helpsConcern") ||
-        rec.reasonKeys.includes("cautionForConcern") ||
+        reasonBase.includes("helpsConcern") ||
+        reasonBase.includes("cautionForConcern") ||
+        reasonBase.includes("concernNotCovered") ||
         rec.positiveKeys.includes("helpsConcern") ||
         rec.warningKeys.includes("cautionForConcern");
       if (delta === 0 && hasBenefit && !concernReason) {
@@ -662,19 +675,42 @@ function detectAnomalies(
       }
     }
 
-    // Probes: если сработали (Δ≠0) — это тоже сигнал (значение вне словаря
-    // не должно влиять).
-    if (sc.probe && delta !== 0) {
-      push({
-        type: "P_vocab_probe_changed_score",
-        severity: "medium",
-        scenarioId: sc.id,
-        anchorScenarioId: sc.anchorId!,
-        scoreBefore: anchor.score,
-        scoreAfter: rec.score,
-        verdict: rec.verdict,
-        details: `probe ${d?.kind}=${d?.value} изменил score на ${delta}`,
-      });
+    // Probes. После Phase 1 (vocabulary adapter) dryness/oiliness ДОЛЖНЫ
+    // маппиться на goal-эквиваленты — проверяем соответствие маппингу.
+    // silicones остаётся неразмеченным → ожидаем no-op.
+    if (sc.probe) {
+      const MAPPED: Record<string, string> = {
+        p_concern_dryness: "g_dry_hydration",
+        p_concern_oiliness: "g_oily_clear",
+      };
+      const mappedTo = MAPPED[sc.id];
+      if (mappedTo) {
+        const target = byScenario.get(mappedTo);
+        if (target && rec.score !== target.score && rec.score !== anchor.score) {
+          // Ни no-op (до Phase 1), ни маппинг (после) — что-то третье.
+          push({
+            type: "P_vocab_mapping_mismatch",
+            severity: "medium",
+            scenarioId: sc.id,
+            anchorScenarioId: mappedTo,
+            scoreBefore: target.score,
+            scoreAfter: rec.score,
+            verdict: rec.verdict,
+            details: `probe ${d?.value}: score=${rec.score}, ожидали как у ${mappedTo} (${target.score}) или якоря (${anchor.score})`,
+          });
+        }
+      } else if (delta !== 0) {
+        push({
+          type: "P_vocab_probe_changed_score",
+          severity: "medium",
+          scenarioId: sc.id,
+          anchorScenarioId: sc.anchorId!,
+          scoreBefore: anchor.score,
+          scoreAfter: rec.score,
+          verdict: rec.verdict,
+          details: `probe ${d?.kind}=${d?.value} изменил score на ${delta}`,
+        });
+      }
     }
   }
   return out;

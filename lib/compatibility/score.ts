@@ -55,52 +55,158 @@ function isProfileEmpty(p: CompatibilityProfile): boolean {
   );
 }
 
+const BLOCKER_KEY = "compatibility.reasons.avoidedFlag";
+
+/**
+ * Verdict = пороги score + гейты (Phase 1 redesign, см.
+ * docs/compat-engine-redesign.md §6; score-математика НЕ менялась):
+ *
+ *   - blocker (нарушение avoidedList) → verdict не выше "mixed";
+ *   - ЛЮБОЙ warning → verdict не выше "good" (excellent с предупреждением —
+ *     противоречие, 206 случаев B1 в аудите 2026-07-11).
+ */
 function pickVerdict(
   score: number,
   warnings: readonly RuleHit[],
 ): CompatibilityVerdict {
-  // Жёсткое: сработал avoidedList → минимум "mixed", даже если score высокий.
-  const hasHardWarning = warnings.some(
-    (w) => w.key === "compatibility.reasons.avoidedFlag",
-  );
-  if (hasHardWarning && score >= 70) return "mixed";
+  let v: CompatibilityVerdict;
+  if (score >= 88) v = "excellent";
+  else if (score >= 72) v = "good";
+  else if (score >= 50) v = "mixed";
+  else v = "risky";
 
-  if (score >= 88) return "excellent";
-  if (score >= 72) return "good";
-  if (score >= 50) return "mixed";
-  return "risky";
+  const hasBlocker = warnings.some((w) => w.key === BLOCKER_KEY);
+  if (hasBlocker) {
+    // Явный пользовательский запрет нарушен → максимум mixed.
+    if (v === "excellent" || v === "good") v = "mixed";
+    return v;
+  }
+  if (warnings.length > 0 && v === "excellent") v = "good";
+  return v;
+}
+
+/* ───────── Reasons: группировка + слоты (Phase 1 explainability) ───────── */
+
+/** Позитивы, завязанные на анкету (concerns/goal) — приоритетный слот. */
+const PROFILE_SPECIFIC_KEYS = new Set([
+  "compatibility.reasons.helpsConcern",
+  "compatibility.reasons.goalAlignment",
+]);
+
+/** Сколько inci-примеров показываем в сгруппированной причине. */
+const GROUP_EXAMPLES = 3;
+
+interface ReasonGroup {
+  rep: RuleHit; // репрезентативный hit (максимальный |weight|)
+  count: number;
+  inciList: string[];
+  totalWeight: number;
 }
 
 /**
- * Топ-причины для UI: 1 hard warning (если есть) + до 3 позитивов.
- * Если нет позитивов — берём warnings.
+ * Сгруппировать hits по (key, concern, avoided): `dryFriendly × 8` становится
+ * ОДНОЙ причиной `dryFriendlyMany` с {count} и {examples}. Для count=1
+ * возвращается исходный hit без изменений (ключи и контракт прежние).
+ */
+function groupHits(hits: readonly RuleHit[]): ReasonGroup[] {
+  const groups = new Map<string, ReasonGroup>();
+  for (const h of hits) {
+    const gk = `${h.key}:${h.concern ?? ""}:${h.avoided ?? ""}`;
+    const g = groups.get(gk);
+    if (!g) {
+      groups.set(gk, {
+        rep: h,
+        count: 1,
+        inciList: h.inci ? [h.inci] : [],
+        totalWeight: h.weight,
+      });
+    } else {
+      g.count += 1;
+      g.totalWeight += h.weight;
+      if (h.inci && !g.inciList.includes(h.inci)) g.inciList.push(h.inci);
+      if (Math.abs(h.weight) > Math.abs(g.rep.weight)) g.rep = h;
+    }
+  }
+  return [...groups.values()];
+}
+
+/** Группа → RuleHit для UI (count>1 → `<key>Many` + count/examples). */
+function groupToHit(g: ReasonGroup): RuleHit {
+  if (g.count === 1) return g.rep;
+  return {
+    ...g.rep,
+    key: `${g.rep.key}Many`,
+    args: {
+      ...(g.rep.args ?? {}),
+      ingredient: g.rep.inci ?? "",
+      count: g.count,
+      examples: g.inciList.slice(0, GROUP_EXAMPLES).join(", "),
+    },
+  };
+}
+
+/**
+ * Топ-причины для UI (слоты, максимум 5):
+ *   1. blocker (avoidedFlag), если есть;
+ *   2. лучший profile-specific позитив (helpsConcern/goalAlignment);
+ *   3. САМЫЙ ВЕСОМЫЙ warning — всегда, если warnings есть (в аудите
+ *      предупреждение выпадало из объяснения в 570 случаях C3);
+ *   4. лучшие generic-позитивы — до заполнения 4 слотов;
+ *   5. + до 1 info-hit (`concernNotCovered`) в конец.
+ * Повторы одного ключа схлопнуты группировкой (1752 случая D2).
  */
 function pickTopReasons(
   positives: readonly RuleHit[],
   warnings: readonly RuleHit[],
+  infos: readonly RuleHit[],
 ): RuleHit[] {
-  const out: RuleHit[] = [];
-  const hardWarning = warnings.find(
-    (w) => w.key === "compatibility.reasons.avoidedFlag",
+  const posGroups = groupHits(positives).sort(
+    (a, b) => b.totalWeight - a.totalWeight,
   );
-  if (hardWarning) out.push(hardWarning);
+  const warnGroups = groupHits(warnings).sort(
+    (a, b) => a.totalWeight - b.totalWeight,
+  );
 
-  // Сортировка позитивов по абсолютному вкладу.
-  const sortedPositives = [...positives].sort((a, b) => b.weight - a.weight);
-  for (const p of sortedPositives) {
+  const out: RuleHit[] = [];
+  const used = new Set<ReasonGroup>();
+
+  const blocker = warnGroups.find((g) => g.rep.key === BLOCKER_KEY);
+  if (blocker) {
+    out.push(groupToHit(blocker));
+    used.add(blocker);
+  }
+
+  const profileSpecific = posGroups.find((g) =>
+    PROFILE_SPECIFIC_KEYS.has(g.rep.key),
+  );
+  if (profileSpecific) {
+    out.push(groupToHit(profileSpecific));
+    used.add(profileSpecific);
+  }
+
+  const topWarning = warnGroups.find((g) => !used.has(g));
+  if (topWarning) {
+    out.push(groupToHit(topWarning));
+    used.add(topWarning);
+  }
+
+  for (const g of posGroups) {
     if (out.length >= 4) break;
-    out.push(p);
+    if (used.has(g)) continue;
+    out.push(groupToHit(g));
+    used.add(g);
+  }
+  // Если позитивов не хватило — добираем оставшиеся warnings.
+  for (const g of warnGroups) {
+    if (out.length >= 4) break;
+    if (used.has(g)) continue;
+    out.push(groupToHit(g));
+    used.add(g);
   }
 
-  // Если позитивов нет — добираем warnings.
-  if (out.length < 2) {
-    const sortedWarnings = [...warnings].sort((a, b) => a.weight - b.weight);
-    for (const w of sortedWarnings) {
-      if (out.length >= 4) break;
-      if (w === hardWarning) continue;
-      out.push(w);
-    }
-  }
+  // Честность персонализации: заявленный concern без покрытия в составе.
+  if (infos.length > 0) out.push(infos[0]);
+
   return out;
 }
 
@@ -163,8 +269,25 @@ export function evaluateCompatibility(
   }
 
   const verdict = pickVerdict(score || BASELINE, warnings);
-  const reasons = pickTopReasons(positives, warnings);
   const matchedConcerns: SkinConcern[] = collectMatchedConcerns(profile, facts);
+
+  // info-hits (weight 0, в score не участвуют): заявленный concern, под
+  // который в составе нет ни одного benefits-ингредиента. Пользователь
+  // видит, что анкета учтена, даже когда совпадений нет.
+  const infos: RuleHit[] = profileEmpty || facts.length === 0
+    ? []
+    : profile.concerns
+        .filter((c) => !matchedConcerns.includes(c))
+        .slice(0, 1)
+        .map((concern) => ({
+          kind: "info" as const,
+          key: "compatibility.reasons.concernNotCovered",
+          args: { concern },
+          weight: 0,
+          concern,
+        }));
+
+  const reasons = pickTopReasons(positives, warnings, infos);
   const triggeredAvoided = collectAvoidedTriggered(profile, facts);
   const rows = buildRows({
     profile,

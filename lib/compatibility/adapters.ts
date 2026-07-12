@@ -82,12 +82,116 @@ export function summaryProfileToEngine(
   p: SkinProfileSummaryLike | null | undefined,
 ): CompatibilityProfile {
   if (!p) return emptyProfile();
+  const n = normalizeProfileVocabulary(p);
   return {
-    skinType: (p.skinType ?? null) as SkinType | null,
-    sensitivity: (p.sensitivity ?? null) as SensitivityLevel | null,
-    concerns: p.concerns as SkinConcern[],
-    avoidedList: p.avoidedList as AvoidedIngredient[],
-    goal: (p.goal ?? null) as SkincareGoal | null,
+    skinType: (n.skinType ?? null) as SkinType | null,
+    sensitivity: (n.sensitivity ?? null) as SensitivityLevel | null,
+    concerns: n.concerns as SkinConcern[],
+    avoidedList: n.avoidedList as AvoidedIngredient[],
+    goal: (n.goal ?? null) as SkincareGoal | null,
+  };
+}
+
+/* ───────── Vocabulary adapter (Phase 1 redesign) ─────────
+ *
+ * Аудит 2026-07-11 (probes): анкета/клиенты могут прислать значения вне
+ * словаря движка (`dryness`, `oiliness`, `oilControl`, `brightening`,
+ * `soothing`, `silicones`) — раньше это был тихий no-op: пользователь думал,
+ * что профиль учтён, движок его игнорировал. Здесь — детерминированный
+ * маппинг на ближайшие валидные значения; неизвестное после маппинга
+ * отфильтровывается (junk не должен попадать в engine).
+ */
+
+const VOCAB_CONCERNS = new Set([
+  "acne", "aging", "pigmentation", "redness", "pores", "blackheads",
+]);
+const VOCAB_GOALS = new Set([
+  "clear_skin", "anti_aging", "hydration", "even_tone", "minimal_routine",
+]);
+const VOCAB_AVOIDED = new Set([
+  "fragrance", "alcohol", "sulfates", "parabens", "essential_oils",
+]);
+
+function normToken(v: string): string {
+  return v.trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+/** goal-синонимы → валидный SkincareGoal. */
+const GOAL_SYNONYMS: Record<string, string> = {
+  oilcontrol: "clear_skin",
+  oil_control: "clear_skin",
+  acnecontrol: "clear_skin",
+  acne_control: "clear_skin",
+  brightening: "even_tone",
+  whitening: "even_tone",
+  antiaging: "anti_aging",
+  anti_age: "anti_aging",
+  moisturizing: "hydration",
+  hydrating: "hydration",
+};
+
+/** avoided-синонимы → валидный AvoidedIngredient. */
+const AVOIDED_SYNONYMS: Record<string, string> = {
+  essentialoils: "essential_oils",
+  essential_oil: "essential_oils",
+  parfum: "fragrance",
+  perfume: "fragrance",
+  sulphates: "sulfates",
+  paraben: "parabens",
+  // "silicones" движок пока не размечает (нет флага в KB/properties) —
+  // отфильтруется; поддержка — отдельная data-задача (Phase 2).
+};
+
+/**
+ * Нормализация словаря профиля. Сверх синонимов:
+ *   - concern "dryness"  → goal=hydration (если goal пуст): пользователь,
+ *     переживающий о сухости, хочет увлажнение;
+ *   - concern "oiliness" → goal=clear_skin (если goal пуст);
+ *   - goal "soothing"    → concern redness (ближайший канал движка).
+ * Функция pure/deterministic; валидные значения проходят без изменений.
+ */
+export function normalizeProfileVocabulary(
+  p: SkinProfileSummaryLike,
+): SkinProfileSummaryLike {
+  const concerns: string[] = [];
+  let goal = p.goal ? normToken(p.goal) : null;
+
+  if (goal && !VOCAB_GOALS.has(goal)) {
+    if (GOAL_SYNONYMS[goal]) {
+      goal = GOAL_SYNONYMS[goal];
+    } else if (goal === "soothing" || goal === "calming") {
+      concerns.push("redness");
+      goal = null;
+    } else {
+      goal = null;
+    }
+  }
+
+  for (const raw of p.concerns ?? []) {
+    const c = normToken(raw);
+    if (VOCAB_CONCERNS.has(c)) {
+      concerns.push(c);
+    } else if (c === "dryness") {
+      if (!goal) goal = "hydration";
+    } else if (c === "oiliness" || c === "oily") {
+      if (!goal) goal = "clear_skin";
+    }
+    // прочее — junk, отфильтровываем
+  }
+
+  const avoidedList: string[] = [];
+  for (const raw of p.avoidedList ?? []) {
+    const a = normToken(raw);
+    if (VOCAB_AVOIDED.has(a)) avoidedList.push(a);
+    else if (AVOIDED_SYNONYMS[a]) avoidedList.push(AVOIDED_SYNONYMS[a]);
+  }
+
+  return {
+    skinType: p.skinType,
+    sensitivity: p.sensitivity,
+    concerns: [...new Set(concerns)],
+    avoidedList: [...new Set(avoidedList)],
+    goal,
   };
 }
 
