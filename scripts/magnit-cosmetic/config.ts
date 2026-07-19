@@ -68,6 +68,21 @@ export const REQUEST_HEADERS: Record<string, string> = {
   "accept-language": "ru-RU,ru;q=0.9,en;q=0.8",
 };
 
+/* ───────── Images (этап 3) ───────── */
+
+/**
+ * Локальное хранилище изображений — тот же формат, что у
+ * scripts/migrate-product-images.ts: <dir>/ab/cd/<sha256(url)>.<ext>,
+ * публичный URL <base>/product-images/ab/cd/<hash>.<ext>.
+ */
+export const IMAGE_URL_PREFIX = "/product-images";
+export const IMAGE_MIN_BYTES = 100;
+export const IMAGE_MAX_BYTES = 25 * 1024 * 1024;
+export const IMAGE_FETCH_TIMEOUT_MS = 15_000;
+export const IMAGE_RETRIES = 2;
+/** Темп скачивания изображений (CDN, не за QRATOR — но не наглеем). */
+export const IMAGE_MIN_INTERVAL_MS = 150;
+
 /* ───────── Paths ───────── */
 
 const ROOT = path.resolve(__dirname, "..", "..");
@@ -75,16 +90,27 @@ const DATA_DIR = path.join(ROOT, "data", "magnit-cosmetic");
 
 export const PATHS = {
   dataDir: DATA_DIR,
-  /** append-only ground truth (git-ignored, как data/raw/* других источников) */
+  /**
+   * Append-only ground truth (git-ignored, как data/raw/* других источников).
+   * Единственный источник истины о скачанных карточках: resume читает его,
+   * state.json больше не используется.
+   */
   rawJsonl: path.join(ROOT, "data", "raw", "magnit-cosmetic-products.jsonl"),
+  /** Неудачные карточки этапа 1 (append; retry-failed переписывает атомарно). */
+  failedJsonl: path.join(DATA_DIR, "failed-products.jsonl"),
+  /** Результат этапа 2 (переписывается атомарно при каждом запуске). */
+  normalizedJsonl: path.join(DATA_DIR, "normalized-products.jsonl"),
+  /** Пропущенные нормализацией (не-косметика, мусор) — для аудита. */
+  skippedJsonl: path.join(DATA_DIR, "skipped-products.jsonl"),
+  /** Ошибки скачивания изображений (этап 3). */
+  imagesFailedJsonl: path.join(DATA_DIR, "failed-images.jsonl"),
+  /** Кандидаты EAN с barcode-list.ru (этап 4, append-only + resume). */
+  barcodeMatchesJsonl: path.join(ROOT, "data", "raw", "magnit-cosmetic-barcode-matches.jsonl"),
+  /** Локальное хранилище изображений (общее с migrate-product-images). */
+  imagesDir: process.env.SKINLY_STORAGE_DIR ?? path.join(ROOT, "storage", "product-images"),
   categoriesJson: path.join(DATA_DIR, "categories.json"),
   catalogProductsJson: path.join(DATA_DIR, "catalog-products.json"),
-  productDetailsJson: path.join(DATA_DIR, "product-details.json"),
-  normalizedJson: path.join(DATA_DIR, "normalized-products.json"),
-  failedJson: path.join(DATA_DIR, "failed-products.json"),
   summaryJson: path.join(DATA_DIR, "summary.json"),
-  /** checkpoint для --resume */
-  stateJson: path.join(DATA_DIR, "state.json"),
   debugDir: path.join(DATA_DIR, "debug"),
   /** persistent-профиль Chrome (общий со smoke-скриптом) */
   chromeProfile: path.join(DATA_DIR, "chrome-profile"),

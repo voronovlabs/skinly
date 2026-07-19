@@ -58,64 +58,30 @@ export interface SkippedProduct {
   detail?: string;
 }
 
+/** Строка failed-products.jsonl (этап 1 / retry-failed). */
 export interface FailedProduct {
+  externalId: string | null;
   url: string;
   error: string;
+  failedAt: string;
+}
+
+/** Строка magnit-cosmetic-barcode-matches.jsonl (этап 4). */
+export interface BarcodeMatchLine {
+  source: "barcode-list";
+  externalId: string;
+  query: string;
+  /** matched / ambiguous / not_found — как у classifyCandidates; error — сбой запроса. */
+  status: "matched" | "ambiguous" | "not_found" | "error";
+  barcode: string | null;
+  matchedName: string | null;
+  score: number;
+  candidates: unknown[];
+  error?: string;
+  enrichedAt: string;
 }
 
 export type UpsertResult = "created" | "updated" | "unchanged";
 
-export interface ImportStats {
-  categoriesFound: number;
-  listedProducts: number;
-  uniqueProducts: number;
-  duplicates: number;
-  detailsFetched: number;
-  detailsFailed: number;
-  normalized: number;
-  skipped: number;
-  skippedNotBeauty: number;
-  created: number;
-  updated: number;
-  unchanged: number;
-  dbErrors: number;
-  noBrand: number;
-  noImage: number;
-  noDescription: number;
-  noCategory: number;
-  /** Разбивка OTHER — для решения о расширении enum перед массовым импортом. */
-  otherHair: number;
-  otherMakeup: number;
-  otherDeodorant: number;
-  otherShaving: number;
-  otherKidsHygiene: number;
-  otherOther: number;
-}
-
-export function emptyStats(): ImportStats {
-  return {
-    categoriesFound: 0,
-    listedProducts: 0,
-    uniqueProducts: 0,
-    duplicates: 0,
-    detailsFetched: 0,
-    detailsFailed: 0,
-    normalized: 0,
-    skipped: 0,
-    skippedNotBeauty: 0,
-    created: 0,
-    updated: 0,
-    unchanged: 0,
-    dbErrors: 0,
-    noBrand: 0,
-    noImage: 0,
-    noDescription: 0,
-    noCategory: 0,
-    otherHair: 0,
-    otherMakeup: 0,
-    otherDeodorant: 0,
-    otherShaving: 0,
-    otherKidsHygiene: 0,
-    otherOther: 0,
-  };
-}
+// ImportStats / emptyStats монолитного конвейера упразднены:
+// счётчики каждого этапа считаются локально в stage-*.ts.

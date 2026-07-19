@@ -20,6 +20,7 @@
  */
 
 import { PrismaClient } from "@prisma/client";
+import { BARCODE_PREFIX } from "./config";
 import type { NormalizedMagnitProduct, UpsertResult } from "./types";
 import { ts } from "./logger";
 
@@ -132,7 +133,26 @@ export async function upsertProduct(
   if (existing.source !== p.source) data.source = p.source;
   if (existing.externalId !== p.externalId) data.externalId = p.externalId;
 
-  // barcode / descriptionEn / id / createdAt — не трогаем никогда
+  // Единственное разрешённое изменение barcode: апгрейд технического
+  // `mc:<externalId>` до настоящего EAN (этап 4 → 5). Настоящий barcode
+  // существующей записи по-прежнему НИКОГДА не перезаписывается. Перед
+  // апгрейдом проверяем unique(barcode)-коллизию с другим товаром.
+  if (
+    present(p.barcode) &&
+    !p.barcode.startsWith(BARCODE_PREFIX) &&
+    existing.barcode.startsWith(BARCODE_PREFIX) &&
+    p.barcode !== existing.barcode
+  ) {
+    const clash = await prisma.product.findUnique({ where: { barcode: p.barcode } });
+    if (!clash) {
+      data.barcode = p.barcode;
+      ts(`product ${p.externalId}: barcode upgrade ${existing.barcode} → ${p.barcode}`);
+    } else {
+      ts(`product ${p.externalId}: EAN ${p.barcode} уже занят (product id=${clash.id}) — barcode не меняю`);
+    }
+  }
+
+  // настоящий barcode / descriptionEn / id / createdAt — не трогаем никогда
 
   if (Object.keys(data).length === 0) return "unchanged";
 
