@@ -66,6 +66,13 @@ export interface FailedProduct {
   failedAt: string;
 }
 
+/** Строка not-found-products.jsonl: товар удалён с сайта (404-заглушка). */
+export interface NotFoundProduct {
+  externalId: string;
+  url: string;
+  notFoundAt: string;
+}
+
 /** Строка magnit-cosmetic-barcode-matches.jsonl (этап 4). */
 export interface BarcodeMatchLine {
   source: "barcode-list";

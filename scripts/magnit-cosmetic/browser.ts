@@ -76,9 +76,39 @@ export async function dismissOverlays(page: Page, opts: { wait: boolean }): Prom
   }
 }
 
+/* ───────── 404-страница Магнит Косметик ───────── */
+
 /**
- * Навигация + ожидание ключевого элемента. Без networkidle.
- * Возвращает HTTP-статус документа (null для SPA-переходов).
+ * Удалённый товар: SPA рендерит заглушку «Здесь ничего не нашлось»
+ * (класс .app-empty-404). Это НЕ временная ошибка — retry бессмысленен.
+ */
+export class ProductNotFoundError extends Error {
+  readonly code = "PRODUCT_NOT_FOUND" as const;
+  constructor(readonly url: string) {
+    super(`PRODUCT_NOT_FOUND: ${url}`);
+    this.name = "ProductNotFoundError";
+  }
+}
+
+const NOT_FOUND_TEXT = "Здесь ничего не нашлось";
+/** CSS-маркеры 404 (класс + текстовый fallback на случай смены Nuxt-хэшей). */
+const NOT_FOUND_SELECTOR = `.app-empty-404, [class*="app-empty-404"], main:has-text("${NOT_FOUND_TEXT}")`;
+
+/** Страница — 404-заглушка? Класс проверяем первым (дёшево), текст — fallback. */
+async function isNotFoundPage(page: Page): Promise<boolean> {
+  if ((await page.locator('.app-empty-404, [class*="app-empty-404"]').count()) > 0) {
+    return true;
+  }
+  return page
+    .evaluate((text) => document.body?.innerText.includes(text) ?? false, NOT_FOUND_TEXT)
+    .catch(() => false);
+}
+
+/**
+ * Навигация + ожидание ОДНОГО ИЗ двух состояний: ключевой элемент
+ * (карточка/листинг) ИЛИ 404-заглушка. Заглушка распознаётся сразу, без
+ * прожигания SELECTOR_TIMEOUT_MS, и бросает ProductNotFoundError.
+ * Без networkidle. Возвращает HTTP-статус документа (null для SPA-переходов).
  * Бросает при таймауте навигации/элемента — обработка у вызывающего.
  */
 export async function gotoAndWait(
@@ -88,7 +118,11 @@ export async function gotoAndWait(
 ): Promise<{ status: number | null }> {
   const res = await page.goto(url, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
   await dismissOverlays(page, { wait: false });
-  await page.waitForSelector(selector, { timeout: SELECTOR_TIMEOUT_MS });
+  // объединённый селектор: резолвится первым появившимся состоянием
+  await page.waitForSelector(`${selector}, ${NOT_FOUND_SELECTOR}`, {
+    timeout: SELECTOR_TIMEOUT_MS,
+  });
+  if (await isNotFoundPage(page)) throw new ProductNotFoundError(url);
   return { status: res?.status() ?? null };
 }
 

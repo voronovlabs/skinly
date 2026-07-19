@@ -98,6 +98,12 @@ export const PATHS = {
   rawJsonl: path.join(ROOT, "data", "raw", "magnit-cosmetic-products.jsonl"),
   /** Неудачные карточки этапа 1 (append; retry-failed переписывает атомарно). */
   failedJsonl: path.join(DATA_DIR, "failed-products.jsonl"),
+  /**
+   * Удалённые товары (404 «Здесь ничего не нашлось») — append-only.
+   * Это НЕ временные ошибки: в failed-products.jsonl не попадают,
+   * при следующих scrape/resume пропускаются.
+   */
+  notFoundJsonl: path.join(DATA_DIR, "not-found-products.jsonl"),
   /** Результат этапа 2 (переписывается атомарно при каждом запуске). */
   normalizedJsonl: path.join(DATA_DIR, "normalized-products.jsonl"),
   /** Пропущенные нормализацией (не-косметика, мусор) — для аудита. */

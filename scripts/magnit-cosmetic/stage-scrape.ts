@@ -22,7 +22,13 @@ import {
   PATHS,
   SOURCE,
 } from "./config";
-import { closeBrowser, openBrowser, warmupSession, type BrowserSession } from "./browser";
+import {
+  closeBrowser,
+  openBrowser,
+  ProductNotFoundError,
+  warmupSession,
+  type BrowserSession,
+} from "./browser";
 import {
   canonicalProductUrl,
   discoverCategories,
@@ -78,13 +84,20 @@ async function saveFailureArtifacts(
 /**
  * Скачивает очередь карточек в append-only JSONL. Общая рабочая лошадка
  * scrape и retry-failed. Возвращает счётчики и список оставшихся неудач.
+ *
+ * Разделение ошибок:
+ *   - ProductNotFoundError (товар удалён, 404-заглушка) — НЕ временная:
+ *     сразу в not-found-products.jsonl, в failed не попадает, retry не будет;
+ *   - остальные (timeout/network/HTTP) — временные: в failed-products.jsonl,
+ *     повтор командой retry-failed.
  */
 async function fetchQueue(
   session: BrowserSession,
   queue: DiscoveredProduct[],
   opts: { debug: boolean },
-): Promise<{ fetched: number; failed: FailedProduct[] }> {
+): Promise<{ fetched: number; notFound: number; failed: FailedProduct[] }> {
   let fetched = 0;
+  let notFound = 0;
   const failed: FailedProduct[] = [];
 
   for (const item of queue) {
@@ -96,15 +109,25 @@ async function fetchQueue(
       if (opts.debug) await saveDebugHtml(item.externalId, html);
       ts(`product ${item.externalId}: fetched${raw.composition ? " (+состав)" : ""} (${Date.now() - t0}ms)`);
     } catch (e) {
-      const err = (e as Error).message.slice(0, 200);
-      failed.push({
-        externalId: item.externalId,
-        url: item.url,
-        error: err,
-        failedAt: new Date().toISOString(),
-      });
-      await saveFailureArtifacts(session, item.externalId);
-      ts(`product ${item.externalId}: FAILED — ${err} (debug: ${PATHS.debugDir})`);
+      if (e instanceof ProductNotFoundError) {
+        notFound++;
+        await appendJsonl(PATHS.notFoundJsonl, {
+          externalId: item.externalId,
+          url: item.url,
+          notFoundAt: new Date().toISOString(),
+        });
+        ts(`product ${item.externalId}: NOT FOUND (товар удалён) — записан в not-found-products.jsonl`);
+      } else {
+        const err = (e as Error).message.slice(0, 200);
+        failed.push({
+          externalId: item.externalId,
+          url: item.url,
+          error: err,
+          failedAt: new Date().toISOString(),
+        });
+        await saveFailureArtifacts(session, item.externalId);
+        ts(`product ${item.externalId}: FAILED — ${err} (debug: ${PATHS.debugDir})`);
+      }
     }
 
     // темп ≤1 карточка/сек (+джиттер), считая от старта навигации
@@ -112,7 +135,7 @@ async function fetchQueue(
     await sleep(Math.max(0, CARD_MIN_INTERVAL_MS - elapsed) + Math.random() * CARD_JITTER_MS);
   }
 
-  return { fetched, failed };
+  return { fetched, notFound, failed };
 }
 
 export async function runScrape(opts: ScrapeOptions): Promise<void> {
@@ -178,13 +201,20 @@ export async function runScrape(opts: ScrapeOptions): Promise<void> {
     }
     ts(`discovery: ${discovered.length} listed, ${byId.size} unique, ${duplicates} dups`);
 
-    /* ── resume: JSONL — источник истины о скачанном ── */
+    /* ── resume: JSONL — источник истины о скачанном; 404 — не повторяем ── */
     const done = opts.refetch
       ? new Set<string>()
       : await readJsonlKeys(PATHS.rawJsonl, "externalId");
-    let queue = [...byId.values()].filter((p) => !done.has(p.externalId));
+    const knownNotFound = opts.refetch
+      ? new Set<string>()
+      : await readJsonlKeys(PATHS.notFoundJsonl, "externalId");
+    let queue = [...byId.values()].filter(
+      (p) => !done.has(p.externalId) && !knownNotFound.has(p.externalId),
+    );
     const alreadyDone = byId.size - queue.length;
-    if (alreadyDone > 0) ts(`resume: ${alreadyDone} карточек уже в JSONL — пропускаю`);
+    if (alreadyDone > 0) {
+      ts(`resume: ${alreadyDone} карточек пропущено (уже в JSONL или в not-found-products.jsonl)`);
+    }
 
     if (opts.offset > 0) queue = queue.slice(opts.offset);
     if (opts.limit > 0) queue = queue.slice(0, opts.limit);
@@ -192,7 +222,7 @@ export async function runScrape(opts: ScrapeOptions): Promise<void> {
     if (opts.saveJson) await saveJson(PATHS.catalogProductsJson, queue);
 
     /* ── карточки ── */
-    const { fetched, failed } = await fetchQueue(session, queue, { debug: opts.debug });
+    const { fetched, notFound, failed } = await fetchQueue(session, queue, { debug: opts.debug });
     for (const f of failed) await appendJsonl(PATHS.failedJsonl, f);
 
     /* ── отчёт ── */
@@ -208,13 +238,15 @@ export async function runScrape(opts: ScrapeOptions): Promise<void> {
       alreadyDone,
       queued: queue.length,
       fetched,
+      notFound,
       failed: failed.length,
     });
     log("\n─── Итог (этап 1: scrape) ───");
     log(`Товаров в листингах:    ${discovered.length}`);
     log(`Уникальных товаров:     ${byId.size}`);
-    log(`Уже были в JSONL:       ${alreadyDone}`);
+    log(`Пропущено (resume/404): ${alreadyDone}`);
     log(`Карточек загружено:     ${fetched}`);
+    log(`Удалено с сайта (404):  ${notFound} (→ not-found-products.jsonl, не ретраятся)`);
     log(`Ошибок (→ failed):      ${failed.length}`);
     log(`Время:                  ${durationSec}s`);
     if (failed.length > 0) log(`Повтор ошибок: npm run magnit:retry-failed -- --experimental`);
@@ -239,6 +271,7 @@ export interface RetryOptions {
  */
 export async function runRetryFailed(opts: RetryOptions): Promise<void> {
   const done = await readJsonlKeys(PATHS.rawJsonl, "externalId");
+  const knownNotFound = await readJsonlKeys(PATHS.notFoundJsonl, "externalId");
 
   // последняя запись на externalId (файл append-only, свежая ошибка — в конце)
   const byId = new Map<string, FailedProduct>();
@@ -248,7 +281,8 @@ export async function runRetryFailed(opts: RetryOptions): Promise<void> {
     byId.set(id, { ...value, externalId: id });
   }
 
-  const stale = [...byId.keys()].filter((id) => done.has(id));
+  // выбрасываем: уже скачанные + известные 404 (их не ретраим никогда)
+  const stale = [...byId.keys()].filter((id) => done.has(id) || knownNotFound.has(id));
   for (const id of stale) byId.delete(id);
 
   let queue: DiscoveredProduct[] = [...byId.values()].map((f) => ({
@@ -270,17 +304,17 @@ export async function runRetryFailed(opts: RetryOptions): Promise<void> {
     try {
       session = await openBrowser({ headful: opts.headful });
       await warmupSession(session.page, `${BASE_URL}/catalog`);
-      const { fetched, failed } = await fetchQueue(session, queue, { debug: opts.debug });
+      const { fetched, notFound, failed } = await fetchQueue(session, queue, { debug: opts.debug });
 
       const retriedIds = new Set(queue.map((q) => q.externalId));
-      const failedIds = new Set(failed.map((f) => f.externalId));
       stillFailed = [
         // не попавшие в этот прогон (за пределами --limit) — остаются как были
         ...stillFailed.filter((f) => !retriedIds.has(f.externalId!)),
-        // повторно упавшие — со свежей ошибкой
+        // повторно упавшие — со свежей ошибкой; оказавшиеся 404 сюда НЕ
+        // возвращаются (fetchQueue уже записал их в not-found-products.jsonl)
         ...failed,
       ];
-      ts(`retry-failed: ok=${fetched}, снова упало=${failedIds.size}`);
+      ts(`retry-failed: ok=${fetched}, оказалось 404=${notFound}, снова упало=${failed.length}`);
     } finally {
       await closeBrowser(session);
     }

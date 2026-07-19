@@ -53,6 +53,12 @@ retry-failed) закрыты флагом `--experimental`.
   `data/magnit-cosmetic/failed-products.jsonl`, парсер продолжает. Повтор —
   только командой `magnit:retry-failed` (успехи переезжают в основной JSONL,
   файл ошибок переписывается атомарно).
+- **Удалённые товары (404)**: SPA-заглушка «Здесь ничего не нашлось»
+  (`.app-empty-404`) распознаётся сразу после навигации, без прожигания
+  таймаута селектора (`ProductNotFoundError`, код `PRODUCT_NOT_FOUND`).
+  Это не временная ошибка: такие id уходят в append-only
+  `not-found-products.jsonl`, в failed не попадают, не ретраятся и
+  пропускаются при следующих scrape/resume (перекачка — только `--refetch`).
 - Производные файлы (normalized/skipped/failed) переписываются только
   атомарно: `<file>.part` → `rename`.
 

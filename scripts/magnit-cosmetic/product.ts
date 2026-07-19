@@ -20,7 +20,7 @@
 import * as cheerio from "cheerio";
 import type { AnyNode, Element } from "domhandler";
 import type { Page } from "playwright";
-import { gotoAndWait } from "./browser";
+import { gotoAndWait, ProductNotFoundError } from "./browser";
 import { canonicalProductUrl } from "./discovery";
 import { debug } from "./logger";
 import type { MagnitCharacteristics, RawMagnitProduct } from "./types";
@@ -449,6 +449,9 @@ async function loadProductOnce(
  * При таймауте/сбое — ОДИН повтор: пауза 1.5с и повторный goto (ошибки
  * бывают временными). Если и вторая попытка без h1 — бросает, вызывающий
  * сохраняет debug-артефакты и идёт дальше. Бесконечных retry нет.
+ *
+ * ProductNotFoundError (404-заглушка «Здесь ничего не нашлось») — НЕ
+ * временная ошибка: пробрасывается сразу, без повтора.
  */
 export async function fetchProductViaBrowser(
   page: Page,
@@ -457,6 +460,7 @@ export async function fetchProductViaBrowser(
   try {
     return await loadProductOnce(page, url);
   } catch (e) {
+    if (e instanceof ProductNotFoundError) throw e; // товар удалён — retry бессмысленен
     debug(`retry ${url}: ${(e as Error).message.slice(0, 80)} — повтор через 1.5с`);
     await page.waitForTimeout(1500);
     return await loadProductOnce(page, url); // второй сбой пробрасывается наружу
