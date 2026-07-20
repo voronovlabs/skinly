@@ -56,6 +56,10 @@ const { values: args, positionals } = parseArgs({
     "public-base-url": { type: "string" },
     /** barcodes: повторить товары со status=error. */
     "retry-errors": { type: "boolean", default: false },
+    /** barcodes: повторить товары со status=not_found (последняя запись). */
+    "retry-not-found": { type: "boolean", default: false },
+    /** barcodes: повторить товары со status=ambiguous (последняя запись). */
+    "retry-ambiguous": { type: "boolean", default: false },
     /** import */
     "dry-run": { type: "boolean", default: false },
     force: { type: "boolean", default: false },
@@ -79,7 +83,8 @@ function usage(): void {
   log("");
   log("Флаги: --limit N --offset N --all --sample-categories --category-url URL");
   log("  --product-url URL --refetch --save-json --headful --debug --verbose");
-  log("  --public-base-url URL --retry-errors --dry-run --force --experimental");
+  log("  --public-base-url URL --retry-errors --retry-not-found --retry-ambiguous");
+  log("  --dry-run --force --experimental");
   log("");
   log("Проба: npm run magnit:scrape -- --experimental --limit 5");
 }
@@ -140,6 +145,8 @@ async function main(): Promise<void> {
         limit: LIMIT,
         dryRun: args["dry-run"] ?? false,
         retryErrors: args["retry-errors"] ?? false,
+        retryNotFound: args["retry-not-found"] ?? false,
+        retryAmbiguous: args["retry-ambiguous"] ?? false,
       });
       return;
 

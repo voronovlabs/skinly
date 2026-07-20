@@ -62,6 +62,50 @@ retry-failed) закрыты флагом `--experimental`.
 - Производные файлы (normalized/skipped/failed) переписываются только
   атомарно: `<file>.part` → `rename`.
 
+### Этап 4: multi-query fallback
+
+Один длинный запрос «brand + полное name» на barcode-list.ru почти всегда
+давал not_found (бренд дублировался, название перегружено служебными
+словами). Теперь `query-builder.ts` строит **до 3 уникальных запросов от
+строгого к широкому**:
+
+```
+brand=Gillette, name="Кассеты для бритья Gillette Mach3 Turbo 4шт"
+  1. "Gillette Mach3 Turbo 4 шт"   (ядро + объём/кол-во)
+  2. "Gillette Mach3 Turbo"        (без объёма)
+  3. "Gillette Mach3"              (укороченное ядро)
+```
+
+Правила генерации: бренд (кроме `Unknown`) добавляется отдельно и удаляется
+из названия; объём/вес/количество (`50 мл`, `0.2 л`, `200 г`, `4 шт`)
+извлекается и нормализуется («число пробел единица»); убираются служебные
+слова («для», «уход», «средство», «кожи», «лица»… — только как отдельные
+токены) и повторы; названия линеек/моделей/оттенков (Mach3, Turbo, SPF50,
+№7, номер тона) сохраняются — если такие токены есть, строгие запросы
+строятся по ним.
+
+Алгоритм перебора: запросы пробуются по очереди (каждый — отдельный
+HTTP-запрос с тем же rate-limit 2–3 сек); первый `matched` останавливает
+перебор; если matched нет — берётся лучший `ambiguous` по score, кандидаты
+со всех запросов объединяются (дедуп по barcode, топ-8 по score);
+`not_found` — только когда ВСЕ запросы вернули пустой список; `error` —
+только когда все запросы упали сетевыми ошибками. Пороги скоринга
+(`MATCH_THRESHOLD` и пр.) не менялись — fallback повышает recall, не трогая
+precision.
+
+Строка JSONL дополнена полями `queriesTried` (все запросы), `volume`,
+`matchedQueryIndex` (какой запрос дал результат); `query` — запрос,
+давший итоговый matched/ambiguous. Файл append-only: на externalId может
+быть несколько строк (после `--retry-*`), resume этапа 4 и import (этап 5)
+используют **последнюю** запись.
+
+Флаги: `--retry-errors` / `--retry-not-found` / `--retry-ambiguous` —
+повторная обработка товаров с соответствующим последним статусом;
+`--limit N` ограничивает число товаров (не HTTP-запросов); `--dry-run` —
+показать сгенерированные запросы без сети и без записи.
+
+Unit-проверки генерации запросов: `scripts/magnit-cosmetic/query-builder.check.ts`.
+
 ## Команды
 
 ```bash
@@ -83,9 +127,11 @@ npm run magnit:images -- --dry-run
 npm run magnit:images
 npm run magnit:images -- --public-base-url https://skinly.msvoronov.com
 
-# этап 4 — настоящие EAN (barcode-list.ru, медленно: ~2.5 сек/товар)
+# этап 4 — настоящие EAN (barcode-list.ru, медленно: ~2.5 сек/запрос, до 3 запросов/товар)
 npm run magnit:barcodes -- --limit 200
+npm run magnit:barcodes -- --dry-run --limit 20        # показать запросы, без сети
 npm run magnit:barcodes -- --retry-errors
+npm run magnit:barcodes -- --limit 100 --retry-not-found --retry-ambiguous
 
 # этап 5 — импорт в Postgres (единственный этап с БД)
 npm run magnit:import -- --dry-run

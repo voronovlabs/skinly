@@ -73,12 +73,29 @@ export interface NotFoundProduct {
   notFoundAt: string;
 }
 
-/** Строка magnit-cosmetic-barcode-matches.jsonl (этап 4). */
+/**
+ * Строка magnit-cosmetic-barcode-matches.jsonl (этап 4).
+ *
+ * Файл append-only: на один externalId допускается несколько строк
+ * (повторы через --retry-*). И resume этапа 4, и import (этап 5) берут
+ * ПОСЛЕДНЮЮ запись. Поля multi-query fallback опциональны — старые строки
+ * (до fallback) их не содержат.
+ */
 export interface BarcodeMatchLine {
   source: "barcode-list";
   externalId: string;
+  /**
+   * Запрос, давший итоговый matched/ambiguous;
+   * для not_found/error — первый (самый строгий) запрос.
+   */
   query: string;
-  /** matched / ambiguous / not_found — как у classifyCandidates; error — сбой запроса. */
+  /** Все отправленные запросы в порядке попыток (от строгого к широкому). */
+  queriesTried?: string[];
+  /** Нормализованный объём/вес/кол-во из названия («50 мл», «4 шт») или null. */
+  volume?: string | null;
+  /** 0-based индекс запроса в queriesTried, давшего итоговый matched/ambiguous; иначе null. */
+  matchedQueryIndex?: number | null;
+  /** matched / ambiguous / not_found — как у classifyCandidates; error — сбой ВСЕХ запросов. */
   status: "matched" | "ambiguous" | "not_found" | "error";
   barcode: string | null;
   matchedName: string | null;
